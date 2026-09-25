@@ -1,0 +1,10 @@
+# hordejakt.refine - install into the project venv:  .venv/bin/pip install -r hordejakt/refine/requirements.txt
+numpy
+scipy
+shapely>=2.0
+pyproj
+pandas
+requests
+tifffile        # GeoTIFF decoding when rasterio is absent
+rasterio        # optional, preferred GeoTIFF reader (brings affine)
+pytest          # tests/test_refine.py

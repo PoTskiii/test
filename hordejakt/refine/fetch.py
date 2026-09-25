@@ -43,7 +43,7 @@ import numpy as np
 import requests
 
 from .. import ROOT
-from .raster import Raster, bbox_to_wgs84, make_transform, snap_bbox, to_utm, to_wgs84
+from .raster import Raster, bbox_to_wgs84, make_transform, snap_bbox
 
 CACHE = Path(os.environ.get("HORDEJAKT_CACHE", ROOT / "data" / "cache"))
 USER_AGENT = "hordejakt-refine/0.1 (hobby treasure-hunt research; python-requests)"
@@ -323,7 +323,6 @@ def choose_format(formats):
 def decode_geotiff(content):
     """(array float32 with NaN nodata, transform) from GeoTIFF bytes (rasterio, else tifffile)."""
     try:
-        import rasterio
         from rasterio.io import MemoryFile
         with MemoryFile(content) as mf, mf.open() as src:
             arr = src.read(1).astype(np.float32)
@@ -485,17 +484,29 @@ def wcs_raster(service_url, kind, bbox, res_m=1.0, coverage=None, fmt=None):
     H = int(round((ymax - ymin) / res_m))
     out = np.full((H, W), np.nan, np.float32)
     step = MAX_PX
+    # the exact FORMAT string is server specific: try the advertised one, then common aliases, then WCS 2.0.1
+    candidates = [fmt] + [f for f in ("GeoTIFF", "GTiff", "image/tiff", "image/geotiff") if f != fmt]
+    working = None
     for r0 in range(0, H, step):
         for c0 in range(0, W, step):
             h, w = min(step, H - r0), min(step, W - c0)
             tb = (xmin + c0 * res_m, ymax - (r0 + h) * res_m, xmin + (c0 + w) * res_m, ymax - r0 * res_m)
-            try:
-                resp = _wcs_request(service_url, coverage, tb, w, h, fmt)
-            except FetchBlocked:
-                raise
-            except FetchError:
-                resp = _wcs_request(service_url, coverage, tb, w, h, fmt, version="2.0.1")
-            arr, tr = decode_coverage(resp)
+            decoded, errs = None, []
+            for f in ([working] if working else candidates):
+                try:
+                    decoded = decode_coverage(_wcs_request(service_url, coverage, tb, w, h, f))
+                    working = f
+                    break
+                except FetchBlocked:
+                    raise
+                except FetchError as exc:
+                    errs.append(f"{f}: {exc}")
+            if decoded is None:
+                try:
+                    decoded = decode_coverage(_wcs_request(service_url, coverage, tb, w, h, "image/tiff", version="2.0.1"))
+                except FetchError as exc:
+                    raise FetchError(f"{kind} GetCoverage failed ({coverage}): " + "; ".join(errs + [f"2.0.1: {exc}"])) from exc
+            arr, tr = decoded
             # place by the returned georeference (robust to half-pixel conventions)
             rr = int(round((ymax - tr[5]) / res_m))
             cc = int(round((tr[2] - xmin) / res_m))
@@ -509,7 +520,7 @@ def wcs_raster(service_url, kind, bbox, res_m=1.0, coverage=None, fmt=None):
     if np.isnan(out).all():
         raise FetchError(f"{kind}: WCS returned only nodata for {bbox}")
     return Raster(out, make_transform(xmin, ymax, res_m), source=f"wcs:{service_url.rsplit('/', 1)[-1]}:{coverage}",
-                  meta={"coverage": coverage, "format": fmt, "res": res_m, "bbox": list(bbox)})
+                  meta={"coverage": coverage, "format": working or "wcs2", "res": res_m, "bbox": list(bbox)})
 
 
 def _raster_cache(kind, bbox, res):

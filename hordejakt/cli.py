@@ -14,6 +14,22 @@ from . import OUTPUT
 from .fusion import build_layers, credible_area_km2, fuse, hotspots, posterior
 from .grid import GRID
 
+_TO_UTM33 = None
+
+
+def map_links(lat, lon):
+    """Norgeskart takes EPSG:25833 northing/easting in its lat/lon URL parameters."""
+    global _TO_UTM33
+    if _TO_UTM33 is None:
+        from pyproj import Transformer
+        _TO_UTM33 = Transformer.from_crs("EPSG:4326", "EPSG:25833", always_xy=True)
+    e, n = _TO_UTM33.transform(lon, lat)
+    nk = (f"https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat={n:.0f}&lon={e:.0f}"
+          f"&markerLat={n:.0f}&markerLon={e:.0f}")
+    gm = f"https://www.google.com/maps/search/?api=1&query={lat:.5f},{lon:.5f}"
+    return nk, gm
+
+
 DEFAULT_CFG = {"p_monday_pickup": 0.5, "defaultno_variant": "utenfly"}
 
 
@@ -26,8 +42,7 @@ def run(cfg, top=40, min_sep_km=2.0, skip=(), quiet=False, write=True):
     for s in spots:
         i, j = GRID.index(s["lat"], s["lon"])
         s["groups"] = {g: round(float(v[i, j]), 2) for g, v in contrib.items()}
-        s["norgeskart"] = (f"https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat={s['lat']:.5f}"
-                           f"&lon={s['lon']:.5f}&markerLat={s['lat']:.5f}&markerLon={s['lon']:.5f}")
+        s["norgeskart"], s["google_maps"] = map_links(s["lat"], s["lon"])
     summary = {
         "credible_km2": {str(q): round(credible_area_km2(GRID, post, q), 1) for q in (0.5, 0.8, 0.9)},
         "layers": [{"name": L.name, "group": L.independence_group, "reliability": L.reliability,

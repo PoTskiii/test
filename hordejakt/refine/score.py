@@ -11,7 +11,8 @@ so no single clue can veto a spot. Nothing is a hard filter except pixels
 without terrain data.
 
 Stage A (per pixel, work grid ~2 m)                                  r
-  elevation      2.7 Eiffel towers: 810 / 875 / 891 m (w .4/.2/.4), sigma 12 m     0.85
+  elevation      2.7 Eiffel towers: 810 / 875 / 891 m (w .4/.2/.4), sigma 12 m;
+                 mixture density normalised to max 0 (peak ~889 m, 810 m -0.2)   0.85
   flat_ground    blueberry/heather on flat ground: slope 0-8 deg, soft 6 deg        0.60
   water_osm      «INGEN VANN ELLER VANNLYDER»: OSM lake/river/stream/spring
                  within 250 m penalised (soft 90 m)                                0.80
@@ -26,7 +27,7 @@ Stage A (per pixel, work grid ~2 m)                                  r
                  selection proxy only: replaced by Stage B walk_time.              0.70
   landcover      military -4, farmland/residential/quarry.. -3, bog -1.5,
                  bare rock -1 (OSM landuse/natural polygons)                       0.75
-  opening  (DOM) small opening at the box: canopy within ~3 m <= 4 m (soft 3)     0.65
+  opening  (DOM) small opening at the box: canopy within ~3 m <= 3 m (soft 2)     0.65
   mature   (DOM) mature pine/spruce/birch around: canopy 8-30 m ring 13-24 m
                  (soft 4) and >= 70 % of the ring closed (>= 10 m; soft 15 %)      0.60
   sr16           (if SR16 rasters) pine/deciduous/spruce prior, mean height       0.30
@@ -40,7 +41,8 @@ Stage B (per candidate, best parking spot = argmax over drivable road points)
   crossing       straight walk crosses stream (-3) / lake (-4) / >30 deg (-2)      0.60
   logging        «DET HAR VÆRT HOGD»: regrowth (canopy 0.5-8 m) >= 15 % of walk    0.35
   road_type      parking on track/service road preferred; primary -1, grade4/5 -0.7 0.50
-  cattle_grid    «INGEN FERIST SOM JEG MERKA»: cattle grid within 1 km of parking  0.20
+  cattle_grid    «INGEN FERIST SOM JEG MERKA»: cattle grid within 1 km of the
+                 candidate's nearest road point (area proxy; route unknown)         0.20
   morning_sun    first terrain sun (21.09) must be <= ~08:10 CEST                  0.35
   sr16_point     (if SR16 GetFeatureInfo samples) species prior                   0.30
 
@@ -53,7 +55,7 @@ import numpy as np
 from scipy.ndimage import distance_transform_edt, gaussian_filter, uniform_filter
 from scipy.spatial import cKDTree
 from shapely import STRtree, contains_xy, prepare
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, Polygon
 
 from .raster import Raster, angdiff, convergence_deg, make_transform, to_utm, to_wgs84, true_bearing_xy
 
@@ -70,7 +72,7 @@ PARAMS = {
     "rail_radius_m": 1000.0, "rail_soft_m": 400.0,
     "path_radius_m": 40.0, "path_soft_m": 25.0,
     "road_lo_m": 120.0, "road_hi_m": 600.0, "road_soft_lo_m": 60.0, "road_soft_hi_m": 200.0,
-    "opening_max_m": 4.0, "opening_soft_m": 3.0, "opening_radius_m": 3.0,
+    "opening_max_m": 3.0, "opening_soft_m": 2.0, "opening_radius_m": 3.0,
     "ring_inner_m": 8.0, "ring_outer_m": 30.0, "ring_lo_m": 13.0, "ring_hi_m": 24.0, "ring_soft_m": 4.0,
     "ring_closed_frac": 0.7, "ring_closed_soft": 0.15,
     # Stage B
@@ -126,11 +128,17 @@ def robust(ll, name, weights=None):
         return w * np.log(r * np.exp(np.minimum(ll, 0.0)) + (1.0 - r))
 
 
+def _elev_mix(z, p):
+    return sum(w * np.exp(-0.5 * ((np.asarray(z, float) - c) / p["elev_sigma_m"]) ** 2) for c, w in p["elev_centres"])
+
+
 def elevation_ll(z, p=PARAMS):
-    z = np.asarray(z, float)
-    wmax = max(w for _, w in p["elev_centres"])
-    mix = sum(w * np.exp(-0.5 * ((z - c) / p["elev_sigma_m"]) ** 2) for c, w in p["elev_centres"])
-    return np.maximum(np.log(mix / wmax + 1e-12), -12.0)
+    """log of the 810/875/891 m mixture density, normalised so its maximum is 0.
+
+    875 and 891 overlap, so the peak sits near 889 m and 810 m scores ~-0.2."""
+    grid = np.arange(min(c for c, _ in p["elev_centres"]) - 50, max(c for c, _ in p["elev_centres"]) + 50, 0.25)
+    top = float(_elev_mix(grid, p).max())
+    return np.maximum(np.minimum(np.log(_elev_mix(z, p) / top + 1e-12), 0.0), -12.0)
 
 
 def direction_ll(brg_box_to_car_true, p=PARAMS):
@@ -140,7 +148,7 @@ def direction_ll(brg_box_to_car_true, p=PARAMS):
     def g(delta):
         return np.where(delta <= p["dir_tol_deg"], 1.0, np.exp(-0.5 * ((delta - p["dir_tol_deg"]) / p["dir_soft_deg"]) ** 2))
     f = p["dir_new_w"] * g(angdiff(brg_box_to_car_true, p["dir_new_deg"])) + p["dir_old_w"] * g(angdiff(brg_box_to_car_true, old_axis))
-    return np.log(np.maximum(f, 1e-4) / max(p["dir_new_w"], p["dir_old_w"]))
+    return np.minimum(np.log(np.maximum(f, 1e-4) / max(p["dir_new_w"], p["dir_old_w"])), 0.0)
 
 
 def tobler_kmh(slope, factor=1.0):
@@ -231,7 +239,7 @@ def terrain_sunrise(rasters, x, y, z_eye, date="2026-09-21", utc_offset_h=2.0, s
         if el > -1.0:
             hz, _, cov = horizon_elevation(rasters, x, y, z_eye, az)
             last = (az, el, hz, cov)
-            if np.isfinite(hz) and el > hz:
+            if el > (hz if np.isfinite(hz) else 0.0):   # no DTM along the ray -> assume a flat horizon
                 return (t + timedelta(hours=utc_offset_h)).strftime("%H:%M"), az, el, hz, cov
         t += timedelta(minutes=step_min)
     return None, *(last or (np.nan, np.nan, np.nan, 0.0))
@@ -659,7 +667,7 @@ def stage_b(ts, cand_rc, p=PARAMS, weights=None, horizon_rasters=None, sun=True)
                                      for k in idx]))
                 for q in np.argsort(cheap)[::-1][:12]:
                     k = int(idx[q])
-                    res = _eval_parking(grid, chm, x, y, zb, road_xy[k], road_z[k], road_meta[k], wt, wgeoms, wkinds, cattle,
+                    res = _eval_parking(grid, chm, x, y, zb, road_xy[k], road_z[k], road_meta[k], wt, wgeoms, wkinds,
                                         p, weights)
                     if best is None or res["score"] > best["score"]:
                         best = res
@@ -671,6 +679,8 @@ def stage_b(ts, cand_rc, p=PARAMS, weights=None, horizon_rasters=None, sun=True)
         else:
             terms.update(best["terms"])
             info.update(best["info"])
+        if len(cattle) and tree is not None:
+            terms["cattle_grid"], info["cattle_grid_m"] = _cattle_term(cattle, road_xy[kmin], p)
         if sun:
             t_sr, az, el, hz, cov = terrain_sunrise(rasters, x, y, zb + 1.5, p["sun_date"], p["utc_offset_h"])
             info.update({"terrain_sunrise_local": t_sr, "sun_az_deg": az, "sun_el_deg": el, "horizon_deg": hz,
@@ -743,7 +753,7 @@ def _road_label(meta):
     return s
 
 
-def _eval_parking(grid, chm, x, y, zb, pxy, pz, meta, wt, wgeoms, wkinds, cattle, p, weights):
+def _eval_parking(grid, chm, x, y, zb, pxy, pz, meta, wt, wgeoms, wkinds, p, weights):
     prof = walk_profile(grid, pxy[0], pxy[1], x, y, step=max(grid.res[0], 2.0), offtrail=p["offtrail_factor"])
     brg = float(true_bearing_xy(x, y, pxy[0], pxy[1]))
     climb = zb - pz if np.isfinite(pz) else np.nan
@@ -775,12 +785,7 @@ def _eval_parking(grid, chm, x, y, zb, pxy, pz, meta, wt, wgeoms, wkinds, cattle
         if len(h):
             regrowth = float(np.mean((h >= p["regrowth_lo_m"]) & (h <= p["regrowth_hi_m"])))
             terms["logging"] = float(-0.5 * (max(0.0, p["regrowth_frac"] - regrowth) / 0.08) ** 2)
-    cg = None
-    if len(cattle):
-        cg = float(np.min(np.hypot(cattle[:, 0] - pxy[0], cattle[:, 1] - pxy[1])))
-        terms["cattle_grid"] = -1.0 if cg < p["cattle_grid_m"] else 0.0
-    # the cattle-grid clue concerns the (unknown) drive route: it is reported, not used to pick the spot
-    score = sum(float(robust(v, k, weights)) for k, v in terms.items() if k != "cattle_grid")
+    score = sum(float(robust(v, k, weights)) for k, v in terms.items())
     gamma = float(convergence_deg(x, y))
     brg_cb = (brg + 180.0) % 360.0
     info = {"parking": {"x": float(pxy[0]), "y": float(pxy[1]), "z": float(pz) if np.isfinite(pz) else None,
@@ -789,11 +794,19 @@ def _eval_parking(grid, chm, x, y, zb, pxy, pz, meta, wt, wgeoms, wkinds, cattle
             "ascent_m": prof["ascent_m"], "descent_m": prof["descent_m"], "max_slope_deg": prof["max_slope_deg"],
             "bearing_box_to_car": brg, "bearing_car_to_box": brg_cb,
             "bearing_car_to_box_magnetic": (brg_cb - p["declination_deg"]) % 360.0, "grid_convergence_deg": gamma,
-            "crossings": sorted(set(cross)), "regrowth_frac": regrowth, "cattle_grid_m": cg,
+            "crossings": sorted(set(cross)), "regrowth_frac": regrowth,
             "direction_hypothesis": ("SE (whiteboard)" if angdiff(brg, p["dir_new_deg"]) <= p["dir_tol_deg"] else
                                      "WNW (old sign)" if angdiff(brg, (p["sign_magnetic_deg"] + p["declination_deg"] + 180) % 360)
                                      <= p["dir_tol_deg"] else "neither")}
     return {"score": score, "terms": terms, "info": info}
+
+
+def _cattle_term(cattle, road_xy, p):
+    """Weak clue «INGEN FERIST SOM JEG MERKA»: a cattle grid within cattle_grid_m of the candidate's
+    nearest road point (the drive route is unknown, so this is an area-level proxy shared by
+    neighbouring candidates and never used to choose the parking spot)."""
+    cg = float(np.min(np.hypot(cattle[:, 0] - road_xy[0], cattle[:, 1] - road_xy[1])))
+    return (-1.0 if cg < p["cattle_grid_m"] else 0.0), cg
 
 
 # --------------------------------------------------------------------------- driver
@@ -813,6 +826,7 @@ def score_tile(dtm, dom=None, osm=None, sr16=None, p=None, weights=None, work_re
     cands = stage_b(ts, picks, p, weights, horizon_rasters, sun)
     # Stage-A posterior mass of the search disc (radius mass_radius_m) around each candidate;
     # pixels are assigned to their nearest candidate (Voronoi) so discs never double count.
+    radius = min(p["mass_radius_m"], min_sep_m / 2.0)   # candidates are >= min_sep apart -> discs never overlap
     lp = np.where(np.isfinite(ts.total), ts.total - np.nanmax(ts.total[np.isfinite(ts.total)]), -np.inf)
     px = np.exp(lp)
     px /= px.sum()
@@ -825,7 +839,7 @@ def score_tile(dtm, dom=None, osm=None, sr16=None, p=None, weights=None, work_re
             lab[c["row"], c["col"]] = n
         dd, (ii, jj) = distance_transform_edt(~seed, sampling=res, return_indices=True)
         owner = lab[ii, jj]
-        inside = dd <= p["mass_radius_m"]
+        inside = dd <= radius
         mass = np.bincount(owner[inside], weights=px[inside], minlength=len(cands))
     for n, c in enumerate(cands):
         i, j = c["row"], c["col"]
@@ -848,8 +862,12 @@ def score_tile(dtm, dom=None, osm=None, sr16=None, p=None, weights=None, work_re
         for c, wi in zip(cands, w):
             c["p_in_tile"] = float(wi / tot) if tot > 0 else 0.0
     cands.sort(key=lambda c: c["score"], reverse=True)
+    for k, c in enumerate(cands, 1):
+        c["score_rank_in_tile"] = k
     ts.candidates = cands
-    ts.meta = {"work_res_m": res, "n_pool": len(picks), "missing": ts.missing, "params": p}
+    ts.meta = {"work_res_m": res, "n_pool": len(picks), "missing": ts.missing, "params": p, "search_radius_m": radius}
+    for c in cands:
+        c["search_radius_m"] = radius
     for c in cands:
         c["reasons"] = reasons(c, ts.missing, p)
     return ts, cands[:n_out]
@@ -891,7 +909,7 @@ def reasons(c, missing, p=PARAMS):
         if inf.get("regrowth_frac") is not None:
             out.append(f"[{_flag(tb.get('logging', 0))}] regrowth/old logging along walk {inf['regrowth_frac'] * 100:.0f}%")
         if inf.get("cattle_grid_m") is not None and inf["cattle_grid_m"] < p["cattle_grid_m"]:
-            out.append(f"[weak] cattle grid {inf['cattle_grid_m']:.0f} m from parking")
+            out.append(f"[weak] cattle grid {inf['cattle_grid_m']:.0f} m from the nearest road point")
     else:
         out.append(f"[BAD] no drivable road within {p['parking_search_m']:.0f} m")
     if "morning_sun" in tb:
@@ -916,6 +934,7 @@ def candidate_record(c, ts=None):
     rec = {"lat": round(lat, 6), "lon": round(lon, 6), "x_25833": round(c["x"], 1), "y_25833": round(c["y"], 1),
            "elevation_m": round(c["z"], 1), "score": round(c["score"], 3), "score_a": round(c["score_a"], 3),
            "score_b": round(c["score_b"], 3), "p_in_tile": c.get("p_in_tile"), "mass_a": c.get("mass_a"),
+           "search_radius_m": c.get("search_radius_m"), "score_rank_in_tile": c.get("score_rank_in_tile"),
            "road_distance_m": _r(inf.get("road_dist_m")), "nearest_road": inf.get("nearest_road"),
            "slope_deg": _r(inf.get("slope"), 1), "canopy_at_spot_m": _r(inf.get("open_h"), 1),
            "canopy_ring_m": _r(inf.get("ring"), 1),

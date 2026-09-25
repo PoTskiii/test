@@ -20,6 +20,8 @@ KINDS = {
     "object_appeared": "New/removed object (sign, hand, balloon...); value={label, bbox, appeared: bool}",
     "gesture_point_up": "Anja points up/at the sky; value={arm_angle_deg_from_vertical, side, bbox}",
     "person_count": "People visible in frame; value={n}",
+    "ir_mode_switch": "Camera switched day<->IR/night mode (light-level threshold, dusk/dawn timing); "
+                      "value={to_ir: bool, from, to, onset_window: [prev_ts, ts], detected_ts}",
     # sky / light / weather (vision)
     "sky_photometry": "Sky-region statistics; value={luma, r, g, b, cct_k, sat, region}",
     "scene_photometry": "Whole-frame / ground statistics; value={luma, exposure_hint, ir_mode: bool}",

@@ -220,7 +220,7 @@
    "defaultno_variant": "utenfly",
    "skip": []
   },
-  "seconds": 13.4
+  "seconds": 13.3
  },
  "hotspots": [
   {
@@ -251,7 +251,8 @@
     "defaultno_model": 0.04,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.24500&lon=10.87000&markerLat=61.24500&markerLon=10.87000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6797082&lon=278451&markerLat=6797082&markerLon=278451",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.24500,10.87000"
   },
   {
    "lat": 61.335,
@@ -281,7 +282,8 @@
     "defaultno_model": 0.04,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.33500&lon=10.95000&markerLat=61.33500&markerLon=10.95000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6806824&lon=283360&markerLat=6806824&markerLon=283360",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.33500,10.95000"
   },
   {
    "lat": 61.315,
@@ -311,7 +313,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.31500&lon=10.97000&markerLat=61.31500&markerLon=10.97000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6804533&lon=284292&markerLat=6804533&markerLon=284292",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.31500,10.97000"
   },
   {
    "lat": 61.34,
@@ -341,7 +344,8 @@
     "defaultno_model": 0.04,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.34000&lon=11.09000&markerLat=61.34000&markerLon=11.09000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6806924&lon=290876&markerLat=6806924&markerLon=290876",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.34000,11.09000"
   },
   {
    "lat": 61.14,
@@ -371,7 +375,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.14000&lon=10.86000&markerLat=61.14000&markerLon=10.86000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6785436&lon=277174&markerLat=6785436&markerLon=277174",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.14000,10.86000"
   },
   {
    "lat": 61.38,
@@ -401,7 +406,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.38000&lon=10.90000&markerLat=61.38000&markerLon=10.90000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6811997&lon=281003&markerLat=6811997&markerLon=281003",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.38000,10.90000"
   },
   {
    "lat": 61.21,
@@ -431,7 +437,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.21000&lon=10.93000&markerLat=61.21000&markerLon=10.93000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6792986&lon=281424&markerLat=6792986&markerLon=281424",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.21000,10.93000"
   },
   {
    "lat": 61.275,
@@ -461,7 +468,8 @@
     "defaultno_model": 0.04,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.27500&lon=11.18000&markerLat=61.27500&markerLon=11.18000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6799407&lon=295262&markerLat=6799407&markerLon=295262",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.27500,11.18000"
   },
   {
    "lat": 61.42,
@@ -491,7 +499,8 @@
     "defaultno_model": 0.04,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.42000&lon=10.98000&markerLat=61.42000&markerLon=10.98000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6816181&lon=285547&markerLat=6816181&markerLon=285547",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.42000,10.98000"
   },
   {
    "lat": 61.375,
@@ -521,7 +530,8 @@
     "defaultno_model": 0.04,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.37500&lon=10.98000&markerLat=61.37500&markerLon=10.98000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6811175&lon=285238&markerLat=6811175&markerLon=285238",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.37500,10.98000"
   },
   {
    "lat": 61.16,
@@ -551,7 +561,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.16000&lon=10.98000&markerLat=61.16000&markerLon=10.98000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6787258&lon=283764&markerLat=6787258&markerLon=283764",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.16000,10.98000"
   },
   {
    "lat": 61.295,
@@ -581,7 +592,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.29500&lon=10.81000&markerLat=61.29500&markerLon=10.81000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6802848&lon=275593&markerLat=6802848&markerLon=275593",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.29500,10.81000"
   },
   {
    "lat": 61.135,
@@ -611,7 +623,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.13500&lon=10.90000&markerLat=61.13500&markerLon=10.90000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6784744&lon=279290&markerLat=6784744&markerLon=279290",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.13500,10.90000"
   },
   {
    "lat": 61.225,
@@ -641,7 +654,8 @@
     "defaultno_model": 0.04,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.22500&lon=10.89000&markerLat=61.22500&markerLon=10.89000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6794789&lon=279383&markerLat=6794789&markerLon=279383",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.22500,10.89000"
   },
   {
    "lat": 61.35,
@@ -671,7 +685,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.35000&lon=10.98000&markerLat=61.35000&markerLon=10.98000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6808394&lon=285067&markerLat=6808394&markerLon=285067",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.35000,10.98000"
   },
   {
    "lat": 61.38,
@@ -701,7 +716,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.38000&lon=10.94000&markerLat=61.38000&markerLon=10.94000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6811863&lon=283138&markerLat=6811863&markerLon=283138",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.38000,10.94000"
   },
   {
    "lat": 61.41,
@@ -731,7 +747,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.41000&lon=10.88000&markerLat=61.41000&markerLon=10.88000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6815401&lon=280147&markerLat=6815401&markerLon=280147",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.41000,10.88000"
   },
   {
    "lat": 61.16,
@@ -761,7 +778,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.16000&lon=10.87000&markerLat=61.16000&markerLon=10.87000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6787627&lon=277853&markerLat=6787627&markerLon=277853",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.16000,10.87000"
   },
   {
    "lat": 61.45,
@@ -791,7 +809,8 @@
     "defaultno_model": 0.58,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.45000&lon=10.87000&markerLat=61.45000&markerLon=10.87000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6819885&lon=279896&markerLat=6819885&markerLon=279896",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.45000,10.87000"
   },
   {
    "lat": 61.19,
@@ -821,7 +840,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.19000&lon=10.81000&markerLat=61.19000&markerLon=10.81000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6791169&lon=274843&markerLat=6791169&markerLon=274843",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.19000,10.81000"
   },
   {
    "lat": 61.425,
@@ -851,7 +871,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.42500&lon=10.83000&markerLat=61.42500&markerLon=10.83000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6817240&lon=277588&markerLat=6817240&markerLon=277588",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.42500,10.83000"
   },
   {
    "lat": 61.425,
@@ -881,7 +902,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.42500&lon=10.91000&markerLat=61.42500&markerLon=10.91000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6816969&lon=281851&markerLat=6816969&markerLon=281851",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.42500,10.91000"
   },
   {
    "lat": 61.3,
@@ -911,7 +933,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.30000&lon=11.00000&markerLat=61.30000&markerLon=11.00000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6802766&lon=285794&markerLat=6802766&markerLon=285794",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.30000,11.00000"
   },
   {
    "lat": 61.305,
@@ -941,7 +964,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.30500&lon=11.14000&markerLat=61.30500&markerLon=11.14000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6802871&lon=293318&markerLat=6802871&markerLon=293318",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.30500,11.14000"
   },
   {
    "lat": 61.16,
@@ -971,7 +995,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.16000&lon=10.79000&markerLat=61.16000&markerLon=10.79000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6787901&lon=273554&markerLat=6787901&markerLon=273554",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.16000,10.79000"
   },
   {
    "lat": 61.18,
@@ -1001,7 +1026,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.18000&lon=10.97000&markerLat=61.18000&markerLon=10.97000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6789516&lon=283364&markerLat=6789516&markerLon=283364",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.18000,10.97000"
   },
   {
    "lat": 61.75,
@@ -1031,7 +1057,8 @@
     "defaultno_model": 1.18,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.75000&lon=10.88000&markerLat=61.75000&markerLon=10.88000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6853222&lon=282543&markerLat=6853222&markerLon=282543",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.75000,10.88000"
   },
   {
    "lat": 61.295,
@@ -1061,7 +1088,8 @@
     "defaultno_model": 0.04,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.29500&lon=11.18000&markerLat=61.29500&markerLon=11.18000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6801632&lon=295393&markerLat=6801632&markerLon=295393",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.29500,11.18000"
   },
   {
    "lat": 61.275,
@@ -1091,7 +1119,8 @@
     "defaultno_model": -0.31,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.27500&lon=10.84000&markerLat=61.27500&markerLon=10.84000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6800521&lon=277056&markerLat=6800521&markerLon=277056",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.27500,10.84000"
   },
   {
    "lat": 61.755,
@@ -1121,7 +1150,8 @@
     "defaultno_model": 1.18,
     "organizer_prior": 0.44
    },
-   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=61.75500&lon=11.06000&markerLat=61.75500&markerLon=11.06000"
+   "norgeskart": "https://norgeskart.no/#!?project=norgeskart&layers=1002&zoom=14&lat=6853189&lon=292069&markerLat=6853189&markerLon=292069",
+   "google_maps": "https://www.google.com/maps/search/?api=1&query=61.75500,11.06000"
   }
  ]
 }

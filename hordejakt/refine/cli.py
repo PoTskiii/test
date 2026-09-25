@@ -106,7 +106,7 @@ def process_hotspot(h, a, status):
         pts = [(c["x"], c["y"]) for c in cands]
         sr = get("sr16", fetch.sr16, bbox, points=pts)
         if sr and sr.get("points"):
-            vals, names = [], []
+            vals = []
             for c, rec in zip(cands, sr["points"]):
                 v, sp = score.sr16_point_ll(rec)
                 vals.append(v if (rec.get("species") is not None or rec.get("height") is not None) else None)
@@ -212,12 +212,12 @@ def _fmt(v):
 
 
 def field_plan_md(recs, tiles, stops, args, host_status):
-    L = [f"# Field plan - Hordejakten 2026 fine-scale refinement",
+    L = ["# Field plan - Hordejakten 2026 fine-scale refinement",
          "",
          f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} from `{args.hotspots}` "
          f"(top {args.top} hotspots, radius {args.radius_km} km, DTM {args.res} m, work grid {args.work_res} m).",
          "",
-         "**How stops are ordered.** Search theory: each stop is a 25 m search disc around a candidate spot with "
+         f"**How stops are ordered.** Search theory: each stop is a {_radius(recs)} search disc around a candidate spot with "
          f"probability p = P(hotspot region) x P(disc | region). Greedily pick the next stop maximising "
          f"p x P(detect)={args.pd} / (drive + round-trip walk + {args.search_min:.0f} min search). Drive time = straight "
          f"line x 1.4 at {args.drive_kmh:.0f} km/h + 3 min; walk = Tobler off-trail (x0.6) along the straight line. "
@@ -282,6 +282,11 @@ def field_plan_md(recs, tiles, stops, args, host_status):
     return "\n".join(L)
 
 
+def _radius(recs):
+    rs = sorted({r.get("search_radius_m") for r in recs if r.get("search_radius_m")})
+    return f"{rs[0]:.0f} m" if len(rs) == 1 else ("20-25 m" if not rs else f"{rs[0]:.0f}-{rs[-1]:.0f} m")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--hotspots", default=str(OUTPUT / "hotspots.json"))
@@ -319,7 +324,7 @@ def main(argv=None):
         print(f"{t.get('status')} {len(r)} candidates {t.get('data')}", file=sys.stderr)
         recs += r
         tiles.append(t)
-    recs = dedupe(recs)
+    recs = dedupe(recs, min(50.0, a.min_sep))
     recs.sort(key=lambda r: (r["p_abs"], r["score"]), reverse=True)
     start = tuple(float(v) for v in a.start.split(",")) if a.start else None
     stops = plan(recs, start, a.search_min, a.drive_kmh, a.pd, a.hours)

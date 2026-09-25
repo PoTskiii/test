@@ -158,7 +158,6 @@ def _build_fold_map():
 
 
 _FOLD_MAP = _build_fold_map()
-_TOKEN_RE = re.compile(r"[0-9A-Za-zÆØÅæøå\-]+|[^\s]")
 
 
 def _match_case(src: str, word: str) -> str:
@@ -190,64 +189,98 @@ def _fix_digits_in_token(tok: str) -> str:
     return tok
 
 
+_WORD_RE = re.compile(r"^([^0-9A-Za-zÆØÅæøå]*)([0-9A-Za-zÆØÅæøå\-]+)([^0-9A-Za-zÆØÅæøå]*)$")
+
+
+def _directional(context_upper: list) -> bool:
+    for t in context_upper:
+        t = t.strip(".,:;!?()")
+        if (_is_number(t) or "°" in t or t in DIRECTION_CONTEXT or t in COMPASS_WORDS
+                or any(t in COMPASS_WORDS for t in _FOLD_MAP.get(t, ()))):
+            return True
+    return False
+
+
+def _restore_word(core: str, context_upper: list):
+    """Return the corrected (upper-case) form of one OCR token, or None to keep it."""
+    up = core.upper()
+    if up in NB_WORDS:
+        return None
+    repaired = _fix_digits_in_token(core).upper()
+    for form in dict.fromkeys((up, repaired)):
+        if form in NB_WORDS:
+            return form
+        targets = _FOLD_MAP.get(form)
+        if targets and len(targets) == 1:
+            target = next(iter(targets))
+            if form not in PLAIN_WORDS:
+                return target
+            if target in COMPASS_WORDS and _directional(context_upper):
+                return target
+            return form if form != up else None
+    return repaired if repaired != up else None
+
+
+_RUN_RE = re.compile(r"[A-Za-zÆØÅæøå]+|\d+")
+
+
+def _split_glued(word: str) -> str:
+    """Re-insert spaces OCR dropped between words and numbers on small boards.
+
+    'KAMERA410ST' -> 'KAMERA 41 0ST' (a trailing 0 of a digit run is moved to the following
+    letters when that makes a Norwegian word, e.g. 0ST -> ØST). Letter runs shorter than 3
+    stay glued (E6, 4X4, KM2 are left alone).
+    """
+    if not re.fullmatch(r"[0-9A-Za-zÆØÅæøå]+", word or "") or len(word) < 5:
+        return word
+    runs = _RUN_RE.findall(word)
+    if len(runs) < 2:
+        return word
+    for i in range(len(runs) - 1):
+        a, b = runs[i], runs[i + 1]
+        if a.isdigit() and len(a) >= 2 and a[-1] in "0" and not b.isdigit():
+            joined = (a[-1] + b).upper()
+            if joined in _FOLD_MAP or joined in NB_WORDS:
+                runs[i], runs[i + 1] = a[:-1], a[-1] + b
+    letter_len = [len(r) if not r.isdigit() else 0 for r in runs]
+    if max(letter_len) < 3:
+        return word
+    out = runs[0]
+    for prev, cur in zip(runs, runs[1:]):
+        boundary = prev.isdigit() != cur.isdigit() or (cur[:1].isdigit() and not cur.isdigit())
+        long_side = (not prev.isdigit() and len(prev) >= 3) or (not cur.isdigit() and len(cur) >= 3) or \
+            cur.upper() in _FOLD_MAP
+        out += (" " if boundary and long_side else "") + cur
+    return out
+
+
 def fix_norwegian(text: str) -> tuple[str, list]:
-    """Restore Æ/Ø/Å and fix digit/letter confusions in an OCR line.
+    """Restore Æ/Ø/Å and fix digit/letter confusions in one OCR line.
 
     Returns (fixed_text, changes) where changes is a list of (old, new) tokens.
     Conservative: ambiguous ASCII forms that are real words (OST, FOR, VAR ...) are
-    only changed for compass words in a directional context.
+    only changed for compass words in a directional context (number, degree sign,
+    another compass word or MOT/FRA/RETNING/KAMERA within two tokens).
     """
     if not text:
         return text, []
     text = "".join(_LOOKALIKE.get(c, c) for c in text)
-    toks = _TOKEN_RE.findall(text)
-    # Tokenise preserving the separators so we can rebuild the line.
+    text = " ".join(_split_glued(w) for w in text.split(" "))
     pieces = re.split(r"(\s+)", text)
+    word_idx = [i for i, p in enumerate(pieces) if p and not p.isspace()]
+    uwords = [pieces[i].upper() for i in word_idx]
     changes = []
-    words = [p for p in pieces if p and not p.isspace()]
-    uwords = [w.upper() for w in words]
-    out_words = []
-    for i, w in enumerate(words):
-        core_m = re.match(r"^([^0-9A-Za-zÆØÅæøå]*)([0-9A-Za-zÆØÅæøå\-]+)([^0-9A-Za-zÆØÅæøå]*)$", w)
-        if not core_m:
-            out_words.append(w)
+    for j, i in enumerate(word_idx):
+        m = _WORD_RE.match(pieces[i])
+        if not m:
             continue
-        pre, core, post = core_m.groups()
-        up = core.upper()
-        new = None
-        if up not in NB_WORDS:
-            cand = _FOLD_MAP.get(up)
-            if cand is None:
-                repaired = _fix_digits_in_token(core).upper()
-                if repaired != up:
-                    if repaired in NB_WORDS:
-                        new = repaired
-                    else:
-                        cand = _FOLD_MAP.get(repaired)
-                        up2 = repaired
-                        if cand is None:
-                            new = repaired
-                    up = repaired if new is None else up
-            if new is None and cand is not None and len(cand) == 1:
-                target = next(iter(cand))
-                if up not in PLAIN_WORDS:
-                    new = target
-                elif target in COMPASS_WORDS:
-                    ctx_toks = uwords[max(0, i - 2):i] + uwords[i + 1:i + 3]
-                    if any(_is_number(t) or t in DIRECTION_CONTEXT or t in COMPASS_WORDS
-                           or t.rstrip(".,:;") in COMPASS_WORDS or "°" in t for t in ctx_toks):
-                        new = target
+        pre, core, post = m.groups()
+        new = _restore_word(core, uwords[max(0, j - 2):j] + uwords[j + 1:j + 3])
         if new is not None and new != core.upper():
-            new_cased = _match_case(core, new)
-            changes.append((core, new_cased))
-            out_words.append(pre + new_cased + post)
-        else:
-            out_words.append(w)
-    # rebuild with original spacing
-    it = iter(out_words)
-    rebuilt = "".join(p if (not p or p.isspace()) else next(it) for p in pieces)
-    del toks
-    return rebuilt, changes
+            cased = _match_case(core, new)
+            changes.append((core, cased))
+            pieces[i] = pre + cased + post
+    return "".join(pieces), changes
 
 
 # --------------------------------------------------------------------------------------------
@@ -594,9 +627,11 @@ def rectify(rgb: np.ndarray, corners: np.ndarray, target_long: int = 900, max_sc
 def enhance(crop_rgb: np.ndarray) -> dict:
     """Return OCR-ready variants: 'clahe' (flattened, contrast-enhanced ink map) and 'binary'."""
     ink = crop_rgb.min(axis=2).astype(np.float32)          # coloured markers are dark in >= 1 channel
-    sig = max(8.0, 0.06 * max(ink.shape))
-    bg = cv2.GaussianBlur(ink, (0, 0), sig)
-    bg = np.maximum(bg, cv2.dilate(ink, np.ones((5, 5), np.uint8)) * 0 + bg)
+    # paper level: grey-scale closing (max filter wider than a marker stroke) removes the ink,
+    # a heavy blur then gives a smooth illumination field (shade, glare gradients)
+    k = max(5, int(0.035 * max(ink.shape)) | 1)
+    bg = cv2.dilate(ink, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+    bg = cv2.GaussianBlur(bg, (0, 0), max(4.0, 0.04 * max(ink.shape)))
     flat = np.clip(ink / np.maximum(bg, 1.0) * 215.0, 0, 255).astype(np.uint8)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(flat)
     block = max(15, int(0.05 * max(ink.shape)) | 1)
@@ -728,6 +763,7 @@ class _Instance:
     emitted_conf: float = 0.0
     is_new: Optional[bool] = None
     n_empty: int = 0
+    all_emitted: list = field(default_factory=list)
 
 
 @dataclass
@@ -778,6 +814,7 @@ class WhiteboardAnalyzer(Analyzer):
         return True
 
     def _load_known(self, ctx):
+        """Earlier boards from the DB (so restarts do not re-announce old text)."""
         if self._known is not None:
             return
         self._known = []
@@ -787,19 +824,23 @@ class WhiteboardAnalyzer(Analyzer):
         try:
             for o in db.observations(kind="whiteboard_text"):
                 v = o["value"] or {}
-                if o.get("analyzer") != self.name or not v.get("text"):
-                    continue
-                self._known.append({"text": v["text"], "id": o["id"], "ts": o["ts"]})
+                if o.get("analyzer") == self.name and v.get("text"):
+                    self._known.append({"text": v["text"], "id": o["id"], "obs": None})
         except Exception as e:  # pragma: no cover
             log.warning("whiteboard: could not load earlier boards: %s", e)
 
-    def _match_known(self, text):
+    @staticmethod
+    def _kid(k):
+        return k["id"] if k.get("id") is not None else (k["obs"].id if k.get("obs") is not None else None)
+
+    def _match_known(self, text, exclude=()):
         best, bsim = None, 0.0
         for k in self._known or []:
+            if k.get("obs") is not None and any(k["obs"] is e for e in exclude):
+                continue
             sim = board_similarity(text, k["text"])
-            short = min(len(text_key(text)), len(text_key(k["text"])))
-            if short < 6 and text_key(text) != text_key(k["text"]):
-                sim = min(sim, 0.5)
+            if min(len(text_key(text)), len(text_key(k["text"]))) < 6 and text_key(text) != text_key(k["text"]):
+                sim = min(sim, 0.5)   # short texts must match exactly
             if sim > bsim:
                 best, bsim = k, sim
         return best, bsim
@@ -860,13 +901,13 @@ class WhiteboardAnalyzer(Analyzer):
                 if tr.misses > self.p["max_gap_frames"]:
                     out += self._end_track(tr, ctx, frame)
                     self._track = None
-            ctx.state.pop("whiteboard", None) if tr is None or self._track is None else None
+            if self._track is None:
+                ctx.state.pop("whiteboard", None)
             return out
 
         crop = rectify(frame.image, tr.corners, target_long=self.p["rectify_long"])
-        newly = False
         if not tr.confirmed and tr.n >= self.p["persist_frames"]:
-            tr.confirmed = newly = True
+            tr.confirmed = True
             v = {"bbox": list(tr.bbox), "corners": np.round(tr.corners, 1).tolist(), "score": round(best.score, 3),
                  "track_id": tr.id, "area_frac": round(best.area_frac, 5), "aspect": round(best.aspect, 2),
                  "angle_deg": round(best.angle_deg, 1), "ir_mode": best.ir_mode,
@@ -944,16 +985,9 @@ class WhiteboardAnalyzer(Analyzer):
             # only revise if the text changed materially and is at least as confident
             if not final or board_similarity(text, inst.emitted_text) >= 0.92 or m["conf"] < inst.emitted_conf - 0.05:
                 return []
-        known, sim = self._match_known(text)
+        own = [r for r in inst.all_emitted]
+        known, sim = self._match_known(text, exclude=own)
         is_new = known is None or sim < self.p["dedup_sim"]
-        if inst.emitted is not None and inst.emitted.id is not None and known is not None and known["id"] == inst.emitted.id:
-            # the only match is our own first emission -> still the same new board
-            others = [k for k in self._known if k["id"] != inst.emitted.id]
-            saved, self._known = self._known, others
-            known2, sim2 = self._match_known(text)
-            self._known = saved
-            is_new = known2 is None or sim2 < self.p["dedup_sim"]
-            known, sim = (known2, sim2) if not is_new else (None, 0.0)
         support_factor = 0.6 + 0.4 * min(1.0, (m["support"] - 1) / 2.0) if m["support"] else 0.6
         conf = float(np.clip(m["conf"] * support_factor, 0.05, 0.95))
         vis_id = tr.visible_obs.id if tr.visible_obs is not None else None
@@ -966,7 +1000,7 @@ class WhiteboardAnalyzer(Analyzer):
                  "support": m["support"], "engines": sorted({r.engine for r in inst.reads}),
                  "track_id": tr.id, "first_seen_ts": iso(inst.first_ts or tr.first_ts),
                  "last_seen_ts": iso(tr.last_ts), "bbox": list(tr.bbox), "is_new": bool(is_new),
-                 "repeat_of": known["id"] if (known is not None and not is_new) else None,
+                 "repeat_of": self._kid(known) if (known is not None and not is_new) else None,
                  "repeat_sim": round(sim, 3), "revision_of": inst.emitted.id if inst.emitted is not None else None,
                  "visible_obs_id": vis_id}
         ts = inst.first_ts or tr.first_ts
@@ -975,12 +1009,12 @@ class WhiteboardAnalyzer(Analyzer):
                           notes="revision" if inst.emitted is not None else "")
         out = [obs]
         first_emission = inst.emitted is None
-        if first_emission or is_new:
-            if is_new and (first_emission or inst.is_new is False or
-                           board_similarity(text, inst.emitted_text) < self.p["dedup_sim"]):
-                self._announce(ctx, ts, text, value, conf)
+        announce = is_new and (first_emission or board_similarity(text, inst.emitted_text) < self.p["dedup_sim"])
+        if announce:
+            self._announce(ctx, ts, text, value, conf)
         inst.emitted, inst.emitted_text, inst.emitted_conf, inst.is_new = obs, text, m["conf"], is_new
-        self._known.append({"text": text, "id": None, "ts": ts, "_obs": obs})
+        inst.all_emitted.append(obs)
+        self._known.append({"text": text, "id": None, "obs": obs})
         out += self._clock_obs(text, ts, inst.first_capture, inst.frame_id)
         log.info("whiteboard text (track %d, %s, conf %.2f): %r", tr.id, "NEW" if is_new else "repeat", conf, text)
         return out
@@ -1021,10 +1055,6 @@ class WhiteboardAnalyzer(Analyzer):
 
     def _end_track(self, tr: _Track, ctx, frame):
         out = self._finalize(tr, ctx, frame, final=True) if tr.confirmed else []
-        # fill in DB ids of our own emissions so later dedup can reference them
-        for k in self._known or []:
-            if k.get("id") is None and k.get("_obs") is not None:
-                k["id"] = k["_obs"].id
         if ctx.state.get("whiteboard", {}).get("track_id") == tr.id:
             ctx.state.pop("whiteboard", None)
         return out
