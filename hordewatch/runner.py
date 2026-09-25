@@ -36,6 +36,7 @@ ANALYZERS = {
     "weather_bridge": "hordewatch.bridges.met:WeatherBridge",
     "astro_bridge": "hordewatch.astro.solver:AstroBridge",
     "engine_bridge": "hordewatch.bridges.engine:EngineBridge",
+    "blink_watch": "hordewatch.analyzers.blink_watch:BlinkWatchAnalyzer",
 }
 
 DEFAULT_CONFIG = {
@@ -46,7 +47,7 @@ DEFAULT_CONFIG = {
     "clock": {"latency_s": 30.0, "latency_sigma_s": 15.0},
     "analyzers": ["whiteboard", "vlm", "scene", "gesture", "sky", "sun", "rain", "night",
                   "audio_events", "audio_loop", "stream_health",
-                  "aircraft_bridge", "weather_bridge", "astro_bridge", "engine_bridge"],
+                  "aircraft_bridge", "weather_bridge", "astro_bridge", "engine_bridge", "blink_watch"],
     "analyzer_config": {},
     "camera": {"heading_deg": 220.0, "pitch_deg": 0.0, "roll_deg": 0.0, "hfov_deg": 70.0},
     "vlm": {"backend": "ollama", "url": "http://localhost:11434", "model": "llava:7b"},

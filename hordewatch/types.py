@@ -73,6 +73,9 @@ KINDS = {
                         "hanging cords = plumb lines) and/or families of world-horizontal parallel edges; "
                         "value={segments: [[x1,y1,x2,y2(,sigma_deg)]...], kind: 'trunk'|'post'|'plumb'|'auto_lines', "
                         "sigma_deg, horizontal_families: [[[x1,y1,x2,y2]...]...], family_sigma_deg, w, h}"),
+    # blinking lights (hordewatch/blink.py, analyzers/blink_watch.py)
+    "blinking_light": ("Point light analysed over a full-frame-rate burst; value={x, y, frame_size, verdict, "
+                       "morse_text, groups, period_s, duty, n_flashes, clip}"),
 }
 
 
