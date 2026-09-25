@@ -140,6 +140,91 @@ def vertical_residuals(segments, R, f, cx, cy, k1=0.0):
     return np.arcsin(np.clip(np.sum(n * up[..., None, :], -1), -1.0, 1.0))
 
 
+def horizontal_family_residuals(family, R, f, cx, cy, k1=0.0):
+    """Level-line constraint for one family of image segments that are parallel and horizontal in the world
+    (edges of a levelled structure: box top/bottom edges, a platform, a water surface).
+
+    Each segment's interpretation plane has normal n_k; the common 3-D direction d is the least-squares
+    null vector of sum n_k n_k^T (the vanishing point).  Residual = asin(d . up_cam) (radians), shape (...,).
+    Two families at different azimuths pin the horizon line, i.e. pitch *and* roll - unlike plumb lines,
+    whose convergence gives pitch only weakly for a near-level camera.
+    """
+    seg = np.asarray(family, float)
+    f = np.asarray(f, float)[..., None]
+    cx = np.asarray(cx, float)[..., None]
+    cy = np.asarray(cy, float)[..., None]
+    k1 = np.asarray(k1, float)[..., None]
+    d1 = pixel_rays(seg[:, 0], seg[:, 1], f, cx, cy, k1)
+    d2 = pixel_rays(seg[:, 2], seg[:, 3], f, cx, cy, k1)
+    n = np.cross(d1, d2)
+    n = n / np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-12)
+    M = np.einsum("...ki,...kj->...ij", n, n)
+    _, vec = np.linalg.eigh(M)
+    d = vec[..., :, 0]
+    up = R[..., :, 2]
+    # the eigenvector sign is arbitrary: |d . up| keeps r^2, J^T J and J^T r identical to the signed form
+    return np.arcsin(np.clip(np.abs(np.sum(d * up, -1)), 0.0, 1.0))
+
+
+def detect_vertical_segments(image, max_tilt_deg=12.0, min_len_frac=0.12, max_segments=60):
+    """Near-vertical straight edges (tree trunks, posts, hanging cords) in an RGB/gray image.
+
+    Canny + probabilistic Hough; keeps segments within max_tilt_deg of the image vertical and
+    longer than min_len_frac x image height, longest first, suppressing near-duplicates.  These are
+    *candidate* plumb lines: the solver models each with a lean sigma and rejects > 3.5 sigma outliers.
+    Returns an (K, 4) array [x1, y1, x2, y2] (y1 < y2).  Requires OpenCV; returns empty if missing.
+    """
+    try:
+        import cv2
+    except Exception:
+        return np.zeros((0, 4))
+    img = np.asarray(image)
+    g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if img.ndim == 3 else img
+    g = cv2.GaussianBlur(g, (5, 5), 0)
+    h, w = g.shape[:2]
+    edges = cv2.Canny(g, 40, 120)
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 360, threshold=max(30, int(0.08 * h)), minLineLength=int(min_len_frac * h),
+                            maxLineGap=max(3, int(0.01 * h)))
+    if lines is None:
+        return np.zeros((0, 4))
+    L = np.asarray(lines).reshape(-1, 4).astype(float)
+    dx, dy = L[:, 2] - L[:, 0], L[:, 3] - L[:, 1]
+    tilt = np.degrees(np.arctan2(np.abs(dx), np.abs(dy)))
+    L = L[tilt <= max_tilt_deg]
+    if not len(L):
+        return np.zeros((0, 4))
+    flip = L[:, 1] > L[:, 3]
+    L[flip] = L[flip][:, [2, 3, 0, 1]]
+    L = L[np.argsort(-np.hypot(L[:, 2] - L[:, 0], L[:, 3] - L[:, 1]))]
+    # 1) merge collinear fragments (x = a*y + b within 4 px, direction within 1.5 deg)
+    merged = []
+    for x1, y1, x2, y2 in L:
+        a = (x2 - x1) / max(y2 - y1, 1e-6)
+        for m in merged:
+            if abs(a - m["a"]) < np.tan(np.radians(1.5)):
+                ym = 0.5 * (y1 + y2)
+                if abs((x1 + a * (ym - y1)) - (m["x"] + m["a"] * (ym - m["y"]))) < 4.0:
+                    m["y0"], m["y1"] = min(m["y0"], y1), max(m["y1"], y2)
+                    break
+        else:
+            merged.append({"a": a, "x": x1, "y": y1, "y0": y1, "y1": y2})
+    segs = np.array([[m["x"] + m["a"] * (m["y0"] - m["y"]), m["y0"], m["x"] + m["a"] * (m["y1"] - m["y"]), m["y1"]]
+                     for m in merged])
+    segs = segs[np.argsort(-(segs[:, 3] - segs[:, 1]))]
+    # 2) one line per trunk: both edges of a trunk share its lean (correlated), keep the longest
+    keep = []
+    for seg in segs:
+        ym = 0.5 * h
+        xm = seg[0] + (seg[2] - seg[0]) * (ym - seg[1]) / max(seg[3] - seg[1], 1e-6)
+        if any(abs(xm - k[4]) < 0.025 * w for k in keep):
+            continue
+        keep.append(list(seg) + [xm])
+        if len(keep) >= max_segments:
+            break
+    keep = [k[:4] for k in keep]
+    return np.array(keep).reshape(-1, 4)
+
+
 def ground_direction_azimuth(x, y, angle_deg_image, R, f, cx, cy, k1=0.0, step=0.02):
     """World azimuth (deg) of a line on *horizontal ground* seen at pixel (x, y) with image angle.
 

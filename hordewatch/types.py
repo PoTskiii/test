@@ -32,6 +32,8 @@ KINDS = {
     "rain_visual": "Rain seen (drops on roof/lens, streaks); value={present: bool, intensity}",
     "condensation": "Condensation/frost on box roof/walls; value={present: bool, fraction}",
     "fog": "Fog/mist visibility reduction; value={present: bool, contrast_drop}",
+    "temperature": "Temperature read on stream (whiteboard/thermometer/VLM); value={temp_c, where: 'inside'|'outside', source}"
+                   " -- used by the weather bridge vs MET Nordic 2 m air temperature",
     "night_light_event": "Artificial light (torch, headlights, lamp) at night; value={luma_delta, bbox, colour}",
     "aircraft_light": "Blinking/moving point light in sky; value={track: [[t,x,y]...], blink_hz}",
     "star_field": "Point sources consistent with stars; value={n_stars, points: [[x,y,flux]...]}",
@@ -53,11 +55,24 @@ KINDS = {
     # stream / timing
     "stream_health": "Ingest stats; value={bitrate_kbps, fps, dropped, stall_s, resolution}",
     "stream_latency": "Estimated latency live-edge -> real time; value={latency_s, method}",
-    "clock_seen": "A clock/time visible or written (whiteboard); value={shown_time, real_ts}",
+    "stream_stall": ("One ingest disruption (analyzers/stream_health); ts = estimated on-site start; "
+                     "value={kind: upstream|gap|local|decoder|reconnect|skip, start, end, duration_s, onsite_start, "
+                     "onsite_method, phase_mod_period_s, seq, detail}"),
+    "uplink_signature": ("Uplink type inferred from stall timing (Starlink 15 s slot periodicity vs cellular); "
+                         "value={verdict: starlink_like|cellular_like|unknown, n_events, rayleigh_p, phase_s, "
+                         "best_period_s, interval_multiple_frac, lag_ls_power, ...}"),
+    "clock_seen":"A clock/time visible or written (whiteboard); value={shown_time, real_ts}",
     # derived / bridges
     "aircraft_match": "Aircraft matched to a gesture/sound event; value={callsign, icao, alt_ft, elev_deg, az_deg}",
     "weather_match": "Observed weather matched to radar/analysis; value={product, cells: n}",
     "astro_fix": "Location constraint from astronomy; value={method, lat, lon, sigma_km, grid_path}",
+    # astro inputs (hordewatch/astro)
+    "twilight_marker": ("Sky-brightness threshold crossing or IR-mode switch at dusk/dawn (fixed solar depression); "
+                        "value={event: 'dusk'|'dawn', series, threshold, method}"),
+    "camera_vertical": ("Level reference for the camera: image segments of world-vertical structures (trunks, posts, "
+                        "hanging cords = plumb lines) and/or families of world-horizontal parallel edges; "
+                        "value={segments: [[x1,y1,x2,y2(,sigma_deg)]...], kind: 'trunk'|'post'|'plumb'|'auto_lines', "
+                        "sigma_deg, horizontal_families: [[[x1,y1,x2,y2]...]...], family_sigma_deg, w, h}"),
 }
 
 

@@ -193,7 +193,8 @@ def fmt_seconds(x: float) -> str:
 
 
 # ---------------------------------------------------------------------------- stderr parsing
-_FRAG_SPLIT = re.compile(r"(?=\bn:\s*\d+\s+pts:)")
+# no \b: interleaved log output can glue a fragment onto a hex dump ("...3136n:1 pts:16000 ...")
+_FRAG_SPLIT = re.compile(r"(?=n:\s*\d+\s+pts:)")
 _FRAG_RE = re.compile(r"^n:\s*(\d+)\s+pts:\s*(-?\d+|NOPTS)\s+pts_time:\s*(-?[\d.eE+-]+|NOPTS)")
 _SIZE_RE = re.compile(r"\bs:(\d+)x(\d+)")
 _OUT_VID_RE = re.compile(r"Video: rawvideo.*?, (\d{2,5})x(\d{2,5})[ ,\[]")
@@ -221,9 +222,11 @@ class _PtsBook:
             self._cv.notify_all()
 
     def get(self, n, timeout: float):
+        """Wait for entry n. Lines arrive strictly in order, so once a later n is present a missing
+        entry was lost to log interleaving: return None at once instead of waiting."""
         end = time.monotonic() + timeout
         with self._cv:
-            while n not in self._d and not self.closed:
+            while n not in self._d and not self.closed and self.max_n < n:
                 rem = end - time.monotonic()
                 if rem <= 0:
                     break
@@ -275,7 +278,8 @@ class DecodeSession:
                  want_audio: bool = True, audio_sr: int = 16000, copyts: bool = False, realtime: bool = False,
                  keyframes_only: bool = False, audio_transport: str = "auto", feed_stdin: bool = False,
                  on_frame: Optional[Callable] = None, on_audio: Optional[Callable] = None,
-                 on_end: Optional[Callable] = None, label: str = "", info_timeout_s: float = 20.0):
+                 on_end: Optional[Callable] = None, label: str = "", info_timeout_s: float = 20.0,
+                 threads: int = 2):
         self.exe = exe or ffmpeg_exe()
         self.input_url = input_url
         self.input_args = list(input_args)
@@ -295,6 +299,7 @@ class DecodeSession:
         self.on_end = on_end
         self.label = label
         self.info_timeout_s = info_timeout_s
+        self.threads = int(threads or 0)          # decoder threads (0 = ffmpeg auto = all cores)
         if audio_transport == "auto":
             audio_transport = "fd" if os.name == "posix" else "tcp"
         self.audio_transport = audio_transport
@@ -316,6 +321,7 @@ class DecodeSession:
         self._end_lock = threading.Lock()
         self._ended = False
         self._done_event = threading.Event()
+        self._audio_close_lock = threading.Lock()
         self._readers_left = 0
         self.out_dims: Optional[tuple] = None
         self._dims_event = threading.Event()
@@ -342,6 +348,8 @@ class DecodeSession:
             cmd += ["-skip_frame", "nokey"]
         if self.realtime:
             cmd += ["-re"]
+        if self.threads > 0:
+            cmd += ["-threads", str(self.threads)]     # leave CPU for the analyzers (OCR, VLM, ...)
         cmd += [*self.input_args, "-i", "pipe:0" if self.feed_stdin else self.input_url]
         audio_src = "0:a:0"
         if self.audio_input and self.want_audio:
@@ -358,6 +366,8 @@ class DecodeSession:
 
     # ------------------------------------------------------------------ lifecycle
     def start(self):
+        if not (self.want_video or self.want_audio):
+            raise ValueError("DecodeSession needs video or audio")
         pass_fds = ()
         audio_target = None
         rfd = None
@@ -378,9 +388,16 @@ class DecodeSession:
         kw = {}
         if os.name == "nt":
             kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if self.feed_stdin else subprocess.DEVNULL,
-                                     stdout=subprocess.PIPE if self.want_video else subprocess.DEVNULL,
-                                     stderr=subprocess.PIPE, pass_fds=pass_fds, bufsize=0, **kw)
+        try:
+            self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if self.feed_stdin else subprocess.DEVNULL,
+                                         stdout=subprocess.PIPE if self.want_video else subprocess.DEVNULL,
+                                         stderr=subprocess.PIPE, pass_fds=pass_fds, bufsize=0, **kw)
+        except Exception:
+            for fd in (*pass_fds, rfd):
+                if fd is not None:
+                    os.close(fd)
+            self._close_audio()
+            raise
         self.started_wall = time.time()
         if pass_fds:
             os.close(pass_fds[0])       # the child holds the write end now; EOF propagates when it exits
@@ -390,8 +407,6 @@ class DecodeSession:
             self._spawn(self._video_loop, "video")
         if self.want_audio:
             self._spawn(self._audio_loop, "audio")
-        if not (self.want_video or self.want_audio):
-            raise ValueError("DecodeSession needs video or audio")
         return self
 
     def _spawn(self, fn, name, count=True):
@@ -477,24 +492,25 @@ class DecodeSession:
                     pass
         for t in self._threads:
             t.join(2.0)
-        for closer in (self._close_audio,):
-            closer()
+        self._close_audio()
         self.vbook.close()
         self.abook.close()
 
     def _close_audio(self):
-        if self._audio_fd is not None:
+        # locked: the reader thread and terminate() may both get here; a double os.close could hit a reused fd
+        with self._audio_close_lock:
+            fd, self._audio_fd = self._audio_fd, None
+            sock, self._audio_sock = self._audio_sock, None
+        if fd is not None:
             try:
-                os.close(self._audio_fd)
+                os.close(fd)
             except OSError:
                 pass
-            self._audio_fd = None
-        if self._audio_sock is not None:
+        if sock is not None:
             try:
-                self._audio_sock.close()
+                sock.close()
             except OSError:
                 pass
-            self._audio_sock = None
 
     @property
     def returncode(self):

@@ -302,8 +302,12 @@ def _fit_pose(Xd, Yd, e_ef, dist, cam: ApproxCamera, x0, fit_k1=False):
 
 
 def match_frame(points, when, cam: ApproxCamera, aspect=720 / 1280, vmax=5.0, n_det=12, n_cat=30,
-                min_matches=5) -> FrameMatch | None:
-    """Identify detected point sources [[X, Y, flux], ...] (width units) with catalogue stars."""
+                min_matches=5, max_rms=0.004) -> FrameMatch | None:
+    """Identify detected point sources [[X, Y, flux], ...] (width units) with catalogue stars.
+
+    Returns None when fewer than min_matches stars are identified or the final pinhole fit is
+    worse than max_rms (width units; 0.004 = 5 px at 1280) - the guard against false matches.
+    """
     pts = np.asarray(points, float)
     if len(pts) < 4:
         return None
@@ -354,6 +358,9 @@ def match_frame(points, when, cam: ApproxCamera, aspect=720 / 1280, vmax=5.0, n_
     if len(pairs) < min_matches:
         return None
     x, rms, T = _fit_pose(det[pairs[:, 0], 0], det[pairs[:, 0], 1], e_all[pairs[:, 1]], dist_all[pairs[:, 1]], cam, x[:4])
+    if rms > max_rms:                     # a wrong identification cannot be fitted by any real camera
+        log.info("astro: star match rejected (rms %.4f width units, %d pairs)", rms, len(pairs))
+        return None
     ci = idx[pairs[:, 1]]
     sub = ephem.Places(pl.t_unix[ci], pl.ra_deg[ci], pl.dec_deg[ci], pl.dist_km[ci], pl.gast_deg[ci], pl.gha_rate[ci])
     G = rotation_matrix(x[0], x[1], x[2]) @ T

@@ -327,7 +327,7 @@ class VLMAnalyzer(Analyzer):
                 "scene_every_s": 600.0, "timeout_s": 180.0, "ping_timeout_s": 2.0, "max_side": 1024,
                 "board_max_side": 1024, "jpeg_quality": 85, "queue_max": 4, "temperature": 0.0,
                 "max_tokens": 512, "keep_alive": "30m", "use_proxy_env": False, "api_key": None,
-                "dedup_sim": 0.8, "fail_backoff_s": 300.0}
+                "dedup_sim": 0.8, "fail_backoff_s": 300.0, "lazy_connect": False, "reping_s": 300.0}
 
     def __init__(self, config=None):
         super().__init__(config)
@@ -349,12 +349,23 @@ class VLMAnalyzer(Analyzer):
         self._backoff_until = 0.0
         self._known_boards = None
         self._available = None
+        self._connected = True
+        self._last_ping = 0.0
 
     # ------------------------------------------------------------------ lifecycle
     def available(self) -> bool:
+        """Ping the server once (short timeout). With ``lazy_connect: true`` the analyzer stays loaded
+        when the server is down and re-pings every ``reping_s`` (for Ollama started after the monitor)."""
         if self._available is None:
             ok = self.client.ping()
             if not ok:
+                if self.p.get("lazy_connect"):
+                    log.warning("VLM server not reachable yet (%s); lazy_connect: will retry every %.0f s",
+                                self.client.reason, float(self.p["reping_s"]))
+                    self._connected = False
+                    self._last_ping = time.monotonic()
+                    self._available = True
+                    return True
                 log.warning("VLM analyzer disabled: %s. Start a local server, e.g. `ollama serve` and "
                             "`ollama pull %s`, or set vlm.backend=openai for llama.cpp/LM Studio.",
                             self.client.reason, self.p["model"])
@@ -362,6 +373,16 @@ class VLMAnalyzer(Analyzer):
                 log.info("VLM backend %s at %s, model %s", self.client.backend, self.client.url, self.client.model)
             self._available = ok
         return self._available
+
+    def _server_ok(self) -> bool:
+        if self._connected:
+            return True
+        if time.monotonic() - self._last_ping >= float(self.p["reping_s"]):
+            self._last_ping = time.monotonic()
+            self._connected = self.client.ping()
+            if self._connected:
+                log.info("VLM server %s is now reachable", self.client.url)
+        return self._connected
 
     def _ensure_worker(self):
         if self._worker is None or not self._worker.is_alive():
@@ -447,20 +468,25 @@ class VLMAnalyzer(Analyzer):
 
     def on_frame(self, frame, ctx: Context):
         out = self._drain(ctx)
+        if not self._server_ok():
+            ctx.consume("whiteboard")
+            return out
         meta = {"ts": frame.real_ts, "ts_capture": frame.capture_ts, "frame_id": frame.id, "frame_index": frame.index}
         if ctx.consume("whiteboard"):
             wb = ctx.state.get("whiteboard") or {}
             crop = wb.get("crop")
             img = crop if isinstance(crop, np.ndarray) and crop.size else frame.image
+            bmeta = dict(meta)
             if isinstance(crop, np.ndarray) and wb.get("ts") is not None:
-                meta["ts"] = wb["ts"]
-                meta["frame_id"] = wb.get("frame_id", frame.id)
+                bmeta["ts"] = wb["ts"]                       # the frame the crop was cut from
+                bmeta["frame_id"] = wb.get("frame_id", frame.id)
             job = {"kind": "whiteboard", "prompt": WHITEBOARD_PROMPT, "track_id": wb.get("track_id"),
-                   "image": _downscale(img, self.p["board_max_side"]), "bbox": wb.get("bbox"), **meta}
+                   "image": _downscale(img, self.p["board_max_side"]), "bbox": wb.get("bbox"), **bmeta}
             self._submit(job)
         every = float(self.p["scene_every_s"])
         if every >= 0 and time.monotonic() >= self._backoff_until:
-            due = self._last_scene_ts is None or (frame.real_ts - self._last_scene_ts).total_seconds() >= every
+            since = None if self._last_scene_ts is None else (frame.real_ts - self._last_scene_ts).total_seconds()
+            due = since is None or since >= every or since < 0          # < 0: replay jumped back in time
             if due and self._jobs.qsize() == 0:
                 if self._submit({"kind": "scene", "prompt": SCENE_PROMPT,
                                  "image": _downscale(frame.image, self.p["max_side"]), **meta}):
@@ -501,7 +527,8 @@ class VLMAnalyzer(Analyzer):
         return out
 
     def _board_obs(self, job, parsed, ctx):
-        lines = _as_list(parsed.get("lines")) if isinstance(parsed.get("lines"), list) else []
+        raw_lines = parsed.get("lines")
+        lines = [str(x).strip() for x in raw_lines if str(x).strip()] if isinstance(raw_lines, list) else []
         text = parsed.get("text") if isinstance(parsed.get("text"), str) else ""
         if not text and lines:
             text = "\n".join(lines)

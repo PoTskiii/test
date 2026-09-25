@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import re
 import threading
 import time
@@ -254,7 +255,7 @@ def parse_media_playlist(text: str, base_url: str = "") -> MediaPlaylist:
 # ============================================================================ MPEG-TS scanning
 @dataclass
 class TsInfo:
-    anchor90: Optional[int] = None       # earliest PTS in the segment (wrap-aware), 90 kHz, mod 2**33
+    anchor90: Optional[int] = None       # earliest video PTS in the segment (wrap-aware), 90 kHz, mod 2**33
     first_video90: Optional[int] = None
     first_audio90: Optional[int] = None
     n_packets: int = 0
@@ -279,7 +280,7 @@ def _pes_pts(payload: np.ndarray) -> Optional[int]:
 def ts_scan(data: bytes, strip_pids=STRIP_PIDS) -> tuple:
     """Scan an MPEG-TS buffer, returning ``(TsInfo, payload_bytes)``.
 
-    Finds the earliest presentation timestamp (wrap-aware), the first video
+    Finds the anchor (earliest video PTS, wrap-aware), the first video
     PTS (stream_id 0xE0-0xEF) and the first audio PTS (0xC0-0xDF or 0xBD).
     It also drops the packets of ``strip_pids``. Vectorised with numpy: a 5 s
     720p segment (~1.5 MB, 8k packets) takes a few ms."""
@@ -308,7 +309,7 @@ def ts_scan(data: bytes, strip_pids=STRIP_PIDS) -> tuple:
     adapt = (afc & 2) == 2
     start[adapt] += 1 + arr[adapt, 4].astype(np.int32)
     cand = np.nonzero(good & pusi & has_payload & (start < TS_PACKET - 14) & (pid > 0x1F) & (pid != 0x1FFF))[0]
-    ptss = []
+    vpts, apts = [], []
     for k in cand:
         pl = arr[k, start[k]:]
         if pl[0] != 0 or pl[1] != 0 or pl[2] != 1:
@@ -318,11 +319,17 @@ def ts_scan(data: bytes, strip_pids=STRIP_PIDS) -> tuple:
             continue
         info.n_pes += 1
         sid = int(pl[3])
-        if 0xE0 <= sid <= 0xEF and info.first_video90 is None:
-            info.first_video90 = pts
-        elif (0xC0 <= sid <= 0xDF or sid == 0xBD) and info.first_audio90 is None:
-            info.first_audio90 = pts
-        ptss.append(pts)
+        if 0xE0 <= sid <= 0xEF:
+            vpts.append(pts)
+            if info.first_video90 is None:
+                info.first_video90 = pts
+        else:
+            apts.append(pts)
+            if (0xC0 <= sid <= 0xDF or sid == 0xBD) and info.first_audio90 is None:
+                info.first_audio90 = pts
+    # Anchor = earliest *video* PTS (the keyframe the segmenter cut at, which is what PDT stamps);
+    # audio-only segments fall back to the earliest audio PTS. Wrap-aware minimum.
+    ptss = vpts or apts
     if ptss:
         ref = ptss[0]
         d = [((p - ref + (PTS_WRAP >> 1)) % PTS_WRAP) - (PTS_WRAP >> 1) for p in ptss]
@@ -416,8 +423,9 @@ class SegmentTimeline:
       Its running minimum is the floor of uplink plus YouTube processing
       delay.
     * ``media_deficit_s`` (YouTube only, where sequence numbers count from 0 at
-      broadcast start) = wall time since ``stream_start`` minus the media time
-      produced, (last_seq + 1) * target. It grows with every uplink outage.
+      broadcast start) = PDT end of the newest segment minus ``stream_start``,
+      minus the media time produced, (last_seq + 1) * target. It grows with
+      every uplink outage the encoder did not back-fill.
     """
 
     def __init__(self, stats, stall_factor: float = 2.0, min_stall_s: float = 6.0, gap_tolerance_s: float = 0.75,
@@ -521,8 +529,11 @@ class SegmentTimeline:
             upd.update(edge_lag_s=round(lag, 3), last_pdt=newest.pdt.timestamp(),
                        edge_lag_min_s=round(lag if prev_min is None else min(prev_min, lag), 3))
         if self.stream_start and self.target:
+            # media time that should exist since broadcast start but was never produced (uplink outages).
+            # Measured on the PDT clock when possible, so our viewing latency does not leak in.
             produced = (newest.seq + 1) * self.target
-            upd["media_deficit_s"] = round((now - self.stream_start) - produced, 1)
+            ref = newest.pdt_end.timestamp() if newest.pdt is not None else now
+            upd["media_deficit_s"] = round((ref - self.stream_start) - produced, 1)
         self.stats.update(**upd)
         return new
 
@@ -617,7 +628,7 @@ class HLSFetcher:
                  on_segment: Optional[Callable] = None, stop: Optional[threading.Event] = None,
                  headers: Optional[dict] = None, poll_s: Optional[float] = None, timeout: float = 15.0,
                  download: bool = True, max_errors: int = 4, expires_at: Optional[float] = None,
-                 max_height: int = 720, segment_archiver=None, clock=time.time):
+                 max_height: int = 720, segment_archiver=None, clock=time.time, vod: bool = False):
         self.url = url
         self.stats = stats
         self.timeline = timeline
@@ -632,15 +643,21 @@ class HLSFetcher:
         self.max_height = max_height
         self.segment_archiver = segment_archiver
         self.now = clock
+        self.vod = vod              # recorded playlist: one pass, then stop (even without ENDLIST)
         self.ended = False
         self.expiring = False
         self._last_entry: Optional[MapEntry] = None
         self._variant_bw = None
 
     def _poll_interval(self, target: float) -> float:
-        if self.poll_s:
-            return float(self.poll_s)
-        return float(min(5.0, max(0.5, (target or 4.0) / 2.0)))
+        """Poll period, dithered by +-30 %.
+
+        A fixed poll period beats against the fixed segment duration: arrival
+        times quantised by a 3 s poll against 5 s segments repeat every 15 s,
+        which would fake exactly the Starlink periodicity we look for. The
+        random dither turns that quantisation into white noise."""
+        base = float(self.poll_s) if self.poll_s else float(min(5.0, max(0.5, (target or 4.0) / 2.0)))
+        return base * random.uniform(0.7, 1.3) if base >= 0.1 else base
 
     def run(self):
         errors = 0
@@ -661,6 +678,8 @@ class HLSFetcher:
                     self.stop.wait(min(10.0, 1.0 * errors))
                     continue
                 errors = 0
+                prev_ok, self._last_ok_poll = getattr(self, "_last_ok_poll", None), t_req
+                self._prev_ok_poll = prev_ok
                 if is_master_playlist(text):
                     v = choose_variant(parse_master_playlist(text, self.url), self.max_height)
                     if v is None:
@@ -679,7 +698,7 @@ class HLSFetcher:
                     if self.stop.is_set():
                         return
                     self._handle_segment(seg, t_req)
-                if pl.endlist and not new:
+                if (pl.endlist and not new) or self.vod:
                     self.ended = True
                     self.stats.update(state="ended")
                     return
@@ -690,10 +709,16 @@ class HLSFetcher:
             self.fetcher.close()
 
     def _handle_segment(self, seg: Segment, seen: float):
+        # the segment appeared somewhere between the previous successful poll and this one: use the midpoint
+        prev = getattr(self, "_prev_ok_poll", None)
+        unc = (seen - prev) if (prev is not None and seen - prev < 30.0) else None
+        seen_mid = seen - unc / 2.0 if unc is not None else seen
         rec = {"seq": seg.seq, "pdt": seg.pdt.timestamp() if seg.pdt else None, "dur": seg.duration,
-               "seen": round(seen, 3), "disc": seg.discontinuity}
-        if seg.pdt is not None:
-            rec["lag_s"] = round(seen - seg.pdt_end.timestamp(), 3)
+               "seen": round(seen_mid, 3), "seen_unc": None if unc is None else round(unc, 3),
+               "disc": seg.discontinuity}
+        if seg.pdt is not None and unc is not None:
+            # (no lag for the first poll's batch: those segments sat in the playlist before we started)
+            rec["lag_s"] = round(seen_mid - seg.pdt_end.timestamp(), 3)
         if not self.download:
             self.stats.add_segment(**rec)
             if self._variant_bw:
@@ -735,11 +760,18 @@ class HLSFetcher:
         else:
             entry = MapEntry(seq=seg.seq, anchor90=info.anchor90, dur=seg.duration,
                              pdt=seg.pdt.timestamp() if seg.pdt else None, recv=recv, seen=seen)
+        # Restart the decoder on any timeline break: with -copyts a PTS jump would make aresample pad
+        # the jump with silence, and ffmpeg's own discontinuity handling is off.
         restart = False
         if entry is not None:
-            if self._last_entry is not None and (seg.discontinuity or seg.seq != self._last_entry.seq + 1
-                                                 or abs(pts_jump(self._last_entry, entry.anchor90)) > 2.0):
-                restart = seg.discontinuity or abs(pts_jump(self._last_entry, entry.anchor90)) > 2.0
+            last = self._last_entry
+            if last is not None:
+                contiguous = seg.seq == last.seq + 1
+                jump = pts_jump(last, entry.anchor90) if contiguous else None
+                restart = bool(seg.discontinuity or not contiguous or abs(jump) > 2.0)
+                if restart:
+                    log.info("segment %s: timeline break (disc=%s contiguous=%s jump=%s) - restarting decoder",
+                             seg.seq, seg.discontinuity, contiguous, None if jump is None else round(jump, 3))
             self.time_map.add(entry)
             self._last_entry = entry
         if self.on_segment is not None:

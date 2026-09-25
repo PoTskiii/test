@@ -1,0 +1,21 @@
+# --- hordewatch vision (whiteboard / vlm / scene / gesture) ---
+# required (already in the venv): numpy, opencv-python-headless, rapidocr-onnxruntime (bundled PP-OCRv4 ONNX models)
+# optional, used automatically when present:
+#   pytesseract            + system packages `tesseract-ocr tesseract-ocr-nor` (second OCR engine with Æ Ø Å)
+#   mediapipe>=1.0         + pose_landmarker_lite.task (config analyzer_config.gesture.pose_model_path or
+#                            env HORDEWATCH_POSE_MODEL); download once from
+#                            https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
+#   local VLM server (not pip): `ollama serve` + `ollama pull llava:7b` (or llama.cpp llama-server --mmproj, vlm.backend: openai)
+# --- hordewatch astro (sun / moon / stars / twilight) ---
+# required (already in the venv): numpy, scipy, skyfield, skyfield-data (bundles de421.bsp + finals: no downloads),
+#   astropy (FITS for astrometry.net), opencv-python-headless (plumb-line detector, homography)
+# bundled data: hordewatch/astro/data/bright_stars.csv (HYG v4.1, CC BY-SA 4.0)
+# optional (not pip): astrometry.net `solve-field` + wide-field index files (4107-4119) for blind plate solving;
+#   without it the built-in triangle matcher is used
+# --- hordewatch ingest (live YouTube / replay) + stream_health ---
+# required (already in the venv): numpy, imageio-ffmpeg (static ffmpeg 7.0.2), yt-dlp, streamlink,
+#   opencv-python-headless (JPEG archive; Pillow is a fallback), scipy (stream_health periodogram / binomial test)
+# optional: httpx (HLS segment fetcher; falls back to urllib), a system ffmpeg on PATH or `source.ffmpeg:` -
+#   the imageio static build segfaults on MPEG-TS SDT tables, which segment mode strips; only the ffmpeg-direct
+#   HLS fallback needs a build that can parse them (checked automatically by ingest.ffmpeg.mpegts_safe)
+# keep yt-dlp current on the monitoring machine (`pip install -U yt-dlp`): YouTube changes break old versions

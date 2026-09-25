@@ -764,6 +764,7 @@ class _Instance:
     is_new: Optional[bool] = None
     n_empty: int = 0
     all_emitted: list = field(default_factory=list)
+    clocks: set = field(default_factory=set)
 
 
 @dataclass
@@ -804,7 +805,7 @@ class WhiteboardAnalyzer(Analyzer):
         self.p = {**self.DEFAULTS, **{k: v for k, v in (config or {}).items() if k != "_global"}}
         self._track: Optional[_Track] = None
         self._next_id = 1
-        self._known = None           # list of dicts {key, text, id}
+        self._known = None           # earlier boards: dicts {text, id (DB row) or obs (emitted this run)}
         self._trigger_pending_since = None
 
     # ---------------------------------------------------------------- helpers
@@ -947,8 +948,10 @@ class WhiteboardAnalyzer(Analyzer):
         thumb = cv2.resize(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY), (48, 32), interpolation=cv2.INTER_AREA).astype(np.float32)
         changed = tr.thumb is None or float(np.mean(np.abs(thumb - tr.thumb))) > self.p["thumb_change"]
         stale = tr.last_ocr_ts is None or (frame.real_ts - tr.last_ocr_ts).total_seconds() >= self.p["ocr_stable_every_s"]
-        # read every frame until the instance is emitted; afterwards only when it looks different or is stale
-        if tr.inst.emitted is not None and not changed and not stale:
+        # read every frame until the instance is emitted; afterwards (or for a blank/illegible white object
+        # that keeps yielding nothing) only when it looks different or once per ocr_stable_every_s
+        settled = tr.inst.emitted is not None or (tr.inst.n_empty >= 2 and not tr.inst.reads)
+        if settled and not changed and not stale:
             return None
         rapid = get_rapidocr(self.p["ocr_threads"])
         tess = get_tesseract()
@@ -1015,7 +1018,9 @@ class WhiteboardAnalyzer(Analyzer):
         inst.emitted, inst.emitted_text, inst.emitted_conf, inst.is_new = obs, text, m["conf"], is_new
         inst.all_emitted.append(obs)
         self._known.append({"text": text, "id": None, "obs": obs})
-        out += self._clock_obs(text, ts, inst.first_capture, inst.frame_id)
+        out += [o for o in self._clock_obs(text, ts, inst.first_capture, inst.frame_id)
+                if o.value["shown_time"] not in inst.clocks]
+        inst.clocks.update(o.value["shown_time"] for o in out if o.kind == "clock_seen")
         log.info("whiteboard text (track %d, %s, conf %.2f): %r", tr.id, "NEW" if is_new else "repeat", conf, text)
         return out
 

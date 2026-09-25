@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import deque
@@ -102,7 +103,16 @@ class AudioChunker:
 
 # ---------------------------------------------------------------------------- timing policies
 class LiveTiming:
-    """Live timing: PDT when the frame's segment is known, else receive clock + StreamClock latency."""
+    """Live timing: PDT when the frame's segment is known, else receive clock + StreamClock latency.
+
+    Receive-clock fallback (direct mode): the offset ``min(wall - pts)`` is
+    estimated from *video* frames only. Audio borrows it, so audio and video
+    stay consistent in PTS terms (what A/V offset analysis needs), and uses
+    its own clock only until the first frame. Each stream is clamped to be
+    monotonic. Known limitation: the catch-up burst at session start (ffmpeg
+    reads ~3 segments at once) gets capture times near the burst's arrival
+    rather than the live-edge-equivalent time. That affects roughly the first
+    15 s of each direct-mode session only."""
 
     def __init__(self, clock, time_map=None, pdt_offset_s: float = 0.0, real_from_pdt: bool = True,
                  stats=None, window_s: float = 60.0):
@@ -111,38 +121,56 @@ class LiveTiming:
         self.pdt_offset_s = float(pdt_offset_s or 0.0)
         self.real_from_pdt = real_from_pdt
         self.stats = stats
-        self.rclock = ReceiveClock(window_s)
+        self.window_s = window_s
         self._lat: deque = deque(maxlen=24)
+        self.reset_session()
 
     def reset_session(self):
-        self.rclock = ReceiveClock(self.rclock.window_s)
+        self.rclock = ReceiveClock(self.window_s)     # video-driven
+        self.aclock = ReceiveClock(self.window_s)     # audio-only fallback
+        self._last = {"frame": None, "audio": None}
 
-    def _times(self, pts, wall, observe=True):
+    def _mono(self, kind, cap):
+        last = self._last[kind]
+        if last is not None and cap < last:
+            cap = last
+        self._last[kind] = cap
+        return cap
+
+    def _pdt(self, pts):
         e, d = (self.time_map.lookup(pts) if self.time_map is not None else (None, None))
-        if e is not None:
-            cap = e.recv + d
-            if e.pdt is not None and self.real_from_pdt:
-                real = e.pdt + d - self.pdt_offset_s
-                self._lat.append(cap - real)
-                if self.stats is not None:
-                    self.stats.update(latency_pdt_s=round(float(np.median(self._lat)), 3), timing="pdt")
-                return cap, real, "pdt"
-            return cap, cap - self.clock.latency_s, "segment_recv"
-        cap = self.rclock.observe(pts, wall) if observe else self.rclock.estimate(pts, wall)
+        if e is None:
+            return None
+        cap = e.recv + d
+        if e.pdt is not None and self.real_from_pdt:
+            real = e.pdt + d - self.pdt_offset_s
+            self._lat.append(cap - real)
+            if self.stats is not None:
+                self.stats.update(latency_pdt_s=round(float(np.median(self._lat)), 3), timing="pdt")
+            return cap, real, "pdt"
+        return cap, cap - self.clock.latency_s, "segment_recv"
+
+    def frame_times(self, pts, wall, n=None):
+        r = self._pdt(pts)
+        if r is not None:
+            return r
+        cap = self._mono("frame", self.rclock.observe(pts, wall))
         if self.stats is not None:
             self.stats.update(timing="receive_clock")
         return cap, cap - self.clock.latency_s, "receive_clock"
 
-    def frame_times(self, pts, wall, n=None):
-        return self._times(pts, wall)
-
     def audio_times(self, pts, wall):
-        cap, real, m = self._times(pts, wall, observe=False)
-        return cap, real + float(getattr(self.clock, "audio_offset_s", 0.0) or 0.0), m
+        off = float(getattr(self.clock, "audio_offset_s", 0.0) or 0.0)
+        r = self._pdt(pts)
+        if r is not None:
+            return r[0], r[1] + off, r[2]
+        clk = self.rclock if self.rclock.offset is not None else self.aclock
+        cap = self._mono("audio", clk.estimate(pts, wall))
+        return cap, cap - self.clock.latency_s + off, "receive_clock"
 
     def observe_audio_block(self, pts, wall):
         if pts is not None and (self.time_map is None or self.time_map.lookup(pts)[0] is None):
-            self.rclock.observe(pts, wall)
+            self.aclock.observe(pts, wall)
 
 
 class FileTiming:
@@ -222,10 +250,13 @@ class DecoderHost:
         self.on_session_end = on_session_end
         self.session: Optional[DecodeSession] = None
         self.sessions = 0
+        self.closed = False           # set by terminate(): no more (re)starts
         self._lock = threading.RLock()
 
     def start(self, **overrides) -> DecodeSession:
         with self._lock:
+            if self.closed:
+                raise BrokenPipeError("decoder host terminated")
             kw = {**self.session_kwargs, **overrides}
             chunker = AudioChunker(self.audio_sr, self.audio_chunk_s, self.min_partial_s)
             holder = {}
@@ -267,13 +298,17 @@ class DecoderHost:
     def write(self, data: bytes, restart: bool = False):
         """Feed bytes to the current stdin session, (re)starting it when needed."""
         with self._lock:
+            if self.closed:
+                raise BrokenPipeError("decoder host terminated")
             if restart and self.session is not None:
                 self.finish()
             if self.session is None or not self.session.alive:
                 if self.session is not None:
                     log.warning("%s: ffmpeg exited (%s): %s - restarting", self.label, self.session.returncode,
                                 self.session.error_summary())
+                    dead = self.session
                     self.finish(timeout=2.0)
+                    self.adapt_to_error(dead)
                 self.start()
             try:
                 self.session.write(data)
@@ -282,6 +317,18 @@ class DecoderHost:
                 self.finish(timeout=2.0)
                 self.start()
                 self.session.write(data)
+
+    def adapt_to_error(self, sess) -> bool:
+        """If ffmpeg failed because the input has no audio (or no video) stream, stop asking for it."""
+        tail = " ".join(sess.stderr_tail)
+        changed = False
+        if "matches no streams" in tail or "does not contain any stream" in tail:
+            for key, spec in (("want_audio", ":a:0"), ("want_video", ":v:0")):
+                if self.session_kwargs.get(key, True) and re.search(r"Stream map '\d+" + spec, tail):
+                    log.warning("%s: input has no %s stream - disabling it", self.label, key[5:])
+                    self.session_kwargs[key] = False
+                    changed = True
+        return changed
 
     def finish(self, timeout: float = 15.0):
         """Close input, let ffmpeg drain, wait for readers."""
@@ -296,6 +343,7 @@ class DecoderHost:
 
     def terminate(self):
         with self._lock:
+            self.closed = True
             s = self.session
             self.session = None
         if s is not None:

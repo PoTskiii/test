@@ -63,6 +63,14 @@ the live StreamClock updated. A systematic floor of 3 s (wind, directivity) is
 added in quadrature to the statistical sd. One peak alone cannot calibrate:
 latency trades off against position along the track.
 
+Daily audio layers: many per-event audio layers (a live microphone hears dozens of
+overflights a day) would each carry their own reliability and compound if the
+audio is replayed. In ``audio_mode: auto`` (default) audio-only events get
+per-event layers until more than ``audio_daily_threshold`` (6) occur in a local
+day; then they are replaced by one joint layer aircraft_audio_<YYYYMMDD>.npz with a
+*shared* latency, log sum_L w(L) prod_e P_e(x | L) (statistically right, since the
+latency is common, and bounded by a single reliability of 0.5).
+
 Looped audio: default.no found audio repeating 22-48 h later. Audio events within
 ``loop_margin_s`` of an ``audio_loop`` observation are skipped entirely; if loops
 are frequent around an event its layer reliability drops to the minimum.
@@ -107,7 +115,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -120,7 +128,7 @@ from hordejakt.layers.aircraft import BOX, COARSE_DLAT, COARSE_DLON, OBSERVER_M,
 from ..analyzers.base import Analyzer
 from ..types import UTC, Observation, parse_iso
 from .common import (RateLimitedLog, cache_dir, capture_time, coarse_axes, dumps, from_unix, layers_dir,
-                     load_state, posterior_candidates, resolve_path, save_state, setting, stamp, to_unix,
+                     load_state, local_date, posterior_candidates, save_state, setting, stamp, to_unix,
                      upsample, write_layer)
 
 log = logging.getLogger("hordewatch.bridges.adsb")
@@ -162,7 +170,9 @@ DEFAULTS = {
     "camera_heading_deg": 219.6, "camera_pitch_deg": 0.0, "camera_roll_deg": 0.0,
     "camera_focal_px_1280": 1068.0, "image_w": 1280, "image_h": 720,
     "async": True, "live_record": None, "poll_s": 10.0,
+    "audio_mode": "auto", "audio_daily_threshold": 6,
 }
+AUDIO_L_GRID = np.arange(0.0, 120.0 + 1e-9, 2.5)   # fixed audio-latency grid of the daily accumulators
 
 
 def cfg_get(config, key):
@@ -868,11 +878,19 @@ class AdsbLolReleaseProvider(AdsbProvider):
         if not rel:
             raise ProviderError(f"no adsblol release for {tag}")
         assets = sorted((a for a in rel.get("assets", []) if ".tar" in a["name"]), key=lambda a: a["name"])
-        resps = (s.get(a["browser_download_url"], stream=True, timeout=self.timeout) for a in assets)
+        if not assets:
+            raise ProviderError(f"release {rel.get('tag_name')} has no tar parts")
+
+        def resps():
+            for a in assets:
+                r = s.get(a["browser_download_url"], stream=True, timeout=self.timeout)
+                if r.status_code != 200:
+                    raise ProviderError(f"{a['name']}: HTTP {r.status_code}")
+                yield r
         outdir.mkdir(parents=True, exist_ok=True)
         la0, la1, lo0, lo1 = bbox
         n = 0
-        with tarfile.open(fileobj=io.BufferedReader(self._Concat(resps), 1 << 20), mode="r|") as tar:
+        with tarfile.open(fileobj=io.BufferedReader(self._Concat(resps()), 1 << 20), mode="r|") as tar:
             for m in tar:
                 if not m.isfile() or "trace_full_" not in m.name:
                     continue
@@ -1195,21 +1213,37 @@ def audio_cpa(track, lats, lons, t0, t1, dt=2.0, max_km=40.0, sound_speed="isa",
     return CPA(s_out.reshape(shape), t_out.reshape(shape), sd_out.reshape(shape))
 
 
-def audio_prob_from_cpas(cpas, t_obs, lat_vals, lat_w, floor=0.1, s50=16.0, width=2.5):
-    """P(peak at stream time t_obs | x) = floor + (1-floor) sum_L w(L) [1 - prod_a (1 - P_aud match)]
-    for a list of CPA arrays (same shape). ``lat_vals`` are *audio* latencies."""
-    if not cpas:
-        return None
+def audio_prob_per_latency(cpas, t_obs, lat_vals, floor=0.1, s50=16.0, width=2.5):
+    """P(peak at stream time t_obs | x, L) for every audio latency L -> array (len(L), *shape):
+    floor + (1-floor) [1 - prod_a (1 - P_aud(s_a) exp(-(t_obs - L - t_peak_a)^2 / 2 sigma_a^2))]."""
     shape = cpas[0].slant_km.shape
-    P = np.zeros(shape)
+    out = np.empty((len(lat_vals),) + shape)
     aud = [np.nan_to_num(audible_prob(c.slant_km, s50, width)) for c in cpas]
-    for L, w in zip(lat_vals, lat_w):
+    for k, L in enumerate(lat_vals):
         miss = np.ones(shape)
         for c, pa in zip(cpas, aud):
             d = np.nan_to_num(t_obs - L - c.t_peak, nan=1e6)
             miss *= 1.0 - pa * np.exp(-0.5 * (d / np.nan_to_num(c.sigma_t, nan=1.0)) ** 2)
-        P += w * (1.0 - miss)
-    return floor + (1.0 - floor) * P / np.sum(lat_w)
+        out[k] = floor + (1.0 - floor) * (1.0 - miss)
+    return out
+
+
+def audio_prob_from_cpas(cpas, t_obs, lat_vals, lat_w, floor=0.1, s50=16.0, width=2.5):
+    """P(peak at stream time t_obs | x) = sum_L w(L) P(peak | x, L) for a list of CPA
+    arrays (same shape). ``lat_vals`` are *audio* latencies."""
+    if not cpas:
+        return None
+    PL = audio_prob_per_latency(cpas, t_obs, lat_vals, floor, s50, width)
+    w = np.asarray(lat_w, float)
+    return np.tensordot(w / w.sum(), PL, axes=1)
+
+
+def prior_on(grid_vals, Lv, Lw):
+    """Re-express a discrete latency prior (Lv, Lw) on another grid (linear interpolation, renormalised)."""
+    w = np.interp(grid_vals, Lv, Lw, left=0.0, right=0.0)
+    if w.sum() <= 0:
+        w = np.ones_like(grid_vals)
+    return w / w.sum()
 
 
 # =========================================================================== latency calibration
@@ -1295,6 +1329,7 @@ class AircraftBridge(Analyzer):
         self._recorder = None
         self._pool = None
         self._futures = {}
+        self._calib_future = None
         self._last_calib = 0.0
 
     # ----------------------------------------------------------- setup
@@ -1304,9 +1339,10 @@ class AircraftBridge(Analyzer):
     def build_providers(self):
         if self.providers is not None:
             return self.providers
-        root = cache_dir(self.config, "adsb")
+        names = [p for p in self.get("providers") if isinstance(p, str)]
+        root = cache_dir(self.config, "adsb") if set(names) - {"fixture"} else None
         out = []
-        live = LiveRecordProvider(root / "live")
+        live = LiveRecordProvider(root / "live") if root is not None else None
         for p in self.get("providers"):
             if not isinstance(p, str):
                 out.append(p)
@@ -1446,6 +1482,7 @@ class AircraftBridge(Analyzer):
         if not ts.tracks and not ts.complete:
             return {"status": "no_data", "reason": "no ADS-B source covers the window"}
         logP = np.zeros(CL.shape)
+        audio_logPL = None
         rels, descs, matches = [], [], []
         min_alt = float(self.get("min_alt_ft")) * FT
         q, floor = float(self.get("q")), float(self.get("floor"))
@@ -1498,11 +1535,16 @@ class AircraftBridge(Analyzer):
                               width_frac=float(self.get("audio_width_frac")))
                 if c is not None and np.isfinite(c.slant_km).any():
                     cpas.append(c)
-            P = audio_prob_from_cpas(cpas, t_obs, La, Lw, floor=float(self.get("audio_floor")),
-                                     s50=float(self.get("audible_s50_km")), width=float(self.get("audible_width_km")))
-            if P is None:
-                P = np.full(CL.shape, float(self.get("audio_floor")))
+            afloor = float(self.get("audio_floor"))
+            if cpas:
+                PL = audio_prob_per_latency(cpas, t_obs, AUDIO_L_GRID, floor=afloor, s50=float(self.get("audible_s50_km")),
+                                            width=float(self.get("audible_width_km")))
+            else:
+                PL = np.full((len(AUDIO_L_GRID),) + CL.shape, afloor)
+            P = np.tensordot(prior_on(AUDIO_L_GRID + audio_offset, Lv, Lw), PL, axes=1)
             logP += np.log(P)
+            if set(by_kind) == {"audio_aircraft"}:
+                audio_logPL = np.log(PL).astype(np.float32)
             n_loops = sum(1 for lt in loop_ts if abs(lt - t_obs) < 6 * 3600)
             rels.append(0.5 if n_loops >= 3 else rel_cfg["audio_aircraft"])
             descs.append(f"jet noise peak {from_unix(t_obs):%H:%M:%S}Z stream (snr {best[1]['value'].get('snr_db')})")
@@ -1518,19 +1560,83 @@ class AircraftBridge(Analyzer):
                                 + ("" if ts.complete else " (ADS-B coverage incomplete)"),
                     sources=ts.sources or ["ADS-B"])
         path = None
-        if write:
+        daily = None
+        if write and audio_logPL is not None:
+            daily = self._accumulate_audio_day(ev, audio_logPL, (Lv, Lw), audio_offset)
+            if daily is not None:
+                path, meta = daily
+        if write and daily is None:
             path = write_layer(layers_dir(self.config) / f"aircraft_{ev['id']}.npz", ll, grid=GRID,
                                extra={"event_id": ev["id"], "kinds": sorted(by_kind), "t_capture": from_unix(ev["t_first"]),
                                       "complete": ts.complete, "n_aircraft": len(ts.tracks)}, **meta)
+            if audio_logPL is not None:
+                self._accumulate_audio_day(ev, None, (Lv, Lw), audio_offset, per_event_path=path)
         # which aircraft explains the event best at the layer's maximum
         i, j = np.unravel_index(np.nanargmax(logP), logP.shape)
-        matches.append(self.explain(ts.tracks, ev["t_first"], float(CL[i, j]), float(CO[i, j]), Lv, Lw))
+        audio_only = set(by_kind) == {"audio_aircraft"}
+        matches.append(self.explain(ts.tracks, ev["t_first"], float(CL[i, j]), float(CO[i, j]), Lv, Lw,
+                                    extra_delay=35.0 - 0.5 * float(self.get("reaction_s")) if audio_only else 0.0))
         return {"status": "ok", "loglik": ll, "coarse": logP, "meta": meta, "path": str(path) if path else None,
                 "matches": [m for m in matches if m], "n_tracks": len(ts.tracks), "complete": ts.complete}
 
-    def explain(self, tracks, t_capture, lat, lon, Lv, Lw):
-        """Highest-elevation aircraft seen from (lat, lon) at the prior-mean delay."""
-        D = float(np.sum(Lv * Lw)) + 0.5 * float(self.get("reaction_s"))
+    def _accumulate_audio_day(self, ev, logPL, prior, audio_offset, per_event_path=None):
+        """Daily joint layer for audio-only events with a *shared* latency:
+            log J_day(x) = log sum_L w(L) prod_e P_e(x | L)
+        The running sum S(x, L) = sum_e log P_e(x | L) lives in <cache>/adsb/audio_daily/<date>.npz.
+        audio_mode 'event': never merge; 'daily': always; 'auto' (default): per-event layers
+        until more than audio_daily_threshold audio events in a day, then one daily layer
+        replaces them (bounding the damage if the day's audio turns out to be replayed).
+        Returns (path, meta) when the daily layer was (re)written, else None.
+        With logPL None only records ``per_event_path`` for a later merge."""
+        date = local_date(ev["t_first"])
+        acc_path = cache_dir(self.config, "adsb") / "audio_daily" / f"{date}.npz"
+        acc_path.parent.mkdir(parents=True, exist_ok=True)
+        S, info = None, {"events": [], "per_event": {}}
+        if acc_path.exists():
+            d = np.load(acc_path)
+            S, info = d["S"].astype(np.float32), json.loads(str(d["info"]))
+        if logPL is None:
+            info["per_event"][ev["id"]] = str(per_event_path)
+        elif ev["id"] not in info["events"]:
+            S = logPL if S is None else S + logPL
+            info["events"].append(ev["id"])
+        mode = self.get("audio_mode")
+        n = len(info["events"])
+        merge = S is not None and (mode == "daily" or (mode == "auto" and n > int(self.get("audio_daily_threshold"))))
+        tmp = acc_path.with_name(acc_path.name + ".tmp")
+        with open(tmp, "wb") as f:
+            np.savez_compressed(f, S=S if S is not None else np.zeros((0,), np.float32), info=np.array(json.dumps(info)))
+        tmp.replace(acc_path)
+        if not merge or logPL is None:
+            return None
+        Lv, Lw = prior
+        w = prior_on(AUDIO_L_GRID + audio_offset, Lv, Lw)
+        with np.errstate(divide="ignore"):
+            lw = np.log(w)[:, None, None]
+        m = np.max(S + lw, axis=0)
+        logJ = m + np.log(np.sum(np.exp(S + lw - m), axis=0))
+        clats, clons = coarse_axes(BOX, COARSE_DLAT, COARSE_DLON)
+        ll = upsample(logJ, clats, clons, GRID)
+        meta = dict(name=f"hw_aircraft_audio_{date}", reliability=0.5, independence_group=f"hw_aircraft_audio_{date}",
+                    description=f"hordewatch: {n} aircraft sounds on {date} with a shared stream latency",
+                    sources=["ADS-B", "stream audio"])
+        path = write_layer(layers_dir(self.config) / f"aircraft_audio_{date}.npz", ll, grid=GRID,
+                           extra={"events": info["events"], "n_events": n}, **meta)
+        for eid, pth in list(info["per_event"].items()):
+            try:
+                Path(pth).unlink()
+            except OSError:
+                pass
+            info["per_event"].pop(eid)
+        with open(tmp, "wb") as f:
+            np.savez_compressed(f, S=S, info=np.array(json.dumps(info)))
+        tmp.replace(acc_path)
+        return str(path), meta
+
+    def explain(self, tracks, t_capture, lat, lon, Lv, Lw, extra_delay=0.0):
+        """Highest-elevation aircraft seen from (lat, lon) at the prior-mean delay (for sounds
+        ``extra_delay`` ~ s/c moves the look-up back to the closest approach)."""
+        D = float(np.sum(Lv * Lw)) + 0.5 * float(self.get("reaction_s")) + extra_delay
         best = None
         for tr, la, lo, al in positions_at(tracks, t_capture - D, 300.0):
             g = float(haversine(lat, lon, la, lo))
@@ -1557,8 +1663,10 @@ class AircraftBridge(Analyzer):
             evs.append({"id": ev["id"], "t_obs": tc})
         return evs
 
-    def run_calibration(self, db, clock, candidates=None, now=None):
-        evs = self.audio_events_for_calibration(db, clock, now)
+    def run_calibration(self, db, clock, candidates=None, now=None, events=None, audio_offset=None):
+        """Joint latency fit (see calibrate_latency). ``events``/``audio_offset`` may be
+        passed pre-read so this can run in the worker thread without touching the DB."""
+        evs = events if events is not None else self.audio_events_for_calibration(db, clock, now)
         if len(evs) < int(self.get("calib_min_events")):
             return {"status": "insufficient", "n_events": len(evs)}
         if candidates is None:
@@ -1567,7 +1675,8 @@ class AircraftBridge(Analyzer):
             return {"status": "no_candidates"}
         la, lo, w = candidates
         provs = self.build_providers()
-        audio_offset = float((db.calibration("audio_offset_s") if db else 0.0) or 0.0)
+        if audio_offset is None:
+            audio_offset = float((db.calibration("audio_offset_s") if db else 0.0) or 0.0)
 
         def tracks_for(ev):
             return resolve_tracks(provs, ev["t_obs"] - 330.0, ev["t_obs"] + 30.0).tracks
@@ -1625,25 +1734,42 @@ class AircraftBridge(Analyzer):
                 continue
             loops = self._loops(db, ev["t_first"], ev["t_last"]) if "audio_aircraft" in ev["kinds"] else []
             if self.get("async"):
-                if self._pool is None:
-                    self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="aircraft-bridge")
-                self._futures[eid] = self._pool.submit(self._safe_process, ev, prior, loops, audio_offset)
+                self._futures[eid] = self._pool_get().submit(self._safe_process, ev, prior, loops, audio_offset)
                 self._futures[eid].event = ev
             else:
                 out += self._finish(ctx, state, eid, self._safe_process(ev, prior, loops, audio_offset), now, ev)
-        if self.get("calibrate") and now - self._last_calib >= float(self.get("calib_every_s")):
+        if self._calib_future is not None and self._calib_future.done():
+            fut, self._calib_future = self._calib_future, None
+            try:
+                res = fut.result()
+                if res.get("status") == "ok":
+                    self.apply_calibration(ctx, res)
+            except Exception as e:
+                log.exception("latency calibration failed: %s", e)
+        if self.get("calibrate") and self._calib_future is None and now - self._last_calib >= float(self.get("calib_every_s")):
             self._last_calib = now
             n_audio = sum(1 for e in events if "audio_aircraft" in e["kinds"])
             if n_audio >= int(self.get("calib_min_events")) and n_audio != state.get("calib_n_audio"):
-                try:
-                    res = self.run_calibration(db, ctx.clock, now=now)
-                    if res.get("status") == "ok":
-                        self.apply_calibration(ctx, res)
-                    state["calib_n_audio"] = n_audio
-                except Exception as e:
-                    log.exception("latency calibration failed: %s", e)
+                state["calib_n_audio"] = n_audio
+                if self.get("async"):
+                    # same single worker as the events: providers are never used from two threads
+                    evs = self.audio_events_for_calibration(db, ctx.clock, now)
+                    off = float(db.calibration("audio_offset_s", 0.0) or 0.0)
+                    self._calib_future = self._pool_get().submit(self.run_calibration, None, None, None, now, evs, off)
+                else:
+                    try:
+                        res = self.run_calibration(db, ctx.clock, now=now)
+                        if res.get("status") == "ok":
+                            self.apply_calibration(ctx, res)
+                    except Exception as e:
+                        log.exception("latency calibration failed: %s", e)
         save_state(db, self.name, state)
         return out
+
+    def _pool_get(self):
+        if self._pool is None:
+            self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="aircraft-bridge")
+        return self._pool
 
     def _safe_process(self, ev, prior, loops, audio_offset):
         try:

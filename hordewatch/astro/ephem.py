@@ -188,7 +188,8 @@ def rotate_gha(e_ef, delta_deg):
     a = np.radians(delta_deg)
     c, s = np.cos(a), np.sin(a)
     x, y, z = e_ef[..., 0], e_ef[..., 1], e_ef[..., 2]
-    return np.stack([x * c + y * s, y * c - x * s, np.broadcast_to(z, np.shape(x))], axis=-1)
+    xr, yr = x * c + y * s, y * c - x * s
+    return np.stack([xr, yr, np.broadcast_to(z, xr.shape)], axis=-1)
 
 
 def observer_frame(lat_deg, lon_deg, height_m=0.0):
@@ -230,11 +231,16 @@ def topocentric_enu(e_ef, dist_km, r_obs, T):
     return enu / np.linalg.norm(enu, axis=-1, keepdims=True)
 
 
-def apply_refraction(enu, pressure_mbar=1010.0, temp_c=10.0):
-    """Lift unit ENU vectors by atmospheric refraction (apparent direction)."""
+def apply_refraction(enu, pressure_mbar=1010.0, temp_c=10.0, scale=1.0):
+    """Lift unit ENU vectors by atmospheric refraction (apparent direction).
+
+    scale multiplies the standard refraction (a nuisance parameter in the solvers: real
+    refraction near the horizon deviates from any formula by 5-20 %); it broadcasts
+    against enu[..., 0].
+    """
     u = np.clip(enu[..., 2], -1.0, 1.0)
     alt = np.degrees(np.arcsin(u))
-    alt_app = np.radians(alt + refraction_deg(alt, pressure_mbar, temp_c))
+    alt_app = np.radians(alt + scale * refraction_deg(alt, pressure_mbar, temp_c))
     hor = np.hypot(enu[..., 0], enu[..., 1])
     k = np.cos(alt_app) / np.maximum(hor, 1e-12)
     return np.stack([enu[..., 0] * k, enu[..., 1] * k, np.sin(alt_app)], axis=-1)

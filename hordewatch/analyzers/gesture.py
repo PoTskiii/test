@@ -28,6 +28,9 @@ Two detectors
          attachment point (limb pixel nearest the core) to the tip. The head
          (compact, centred, short) never reaches that high.
        * Hand cue: skin colour (day, YCrCb) or bright IR skin near the tip.
+       * Arm-only path: if she sat still long enough to become background, only
+         the moving arm differs; a very elongated (>= 4.5:1), near-vertical blob
+         with a hand cue at its top end is accepted with lower confidence.
        * Both arms up = stretching/waving -> lower confidence.
 
 Output
@@ -51,8 +54,8 @@ real-time estimate inherits the stream latency uncertainty (StreamClock). For
 aircraft matching use onset_window widened by ts_uncertainty_s.
 
 Failure modes (fallback): a person who has been motionless for minutes becomes
-part of the background median (only the moving arm then shows - it is still
-caught if it rises above where the head was); reflections on the transparent
+part of the background median (only the moving arm then shows - handled by the
+arm-only path, which needs a visible hand); reflections on the transparent
 walls; two people overlapping; an arm raised in front of the body (no
 silhouette protrusion); long sleeves in IR (no hand cue).
 """
@@ -90,7 +93,7 @@ def _is_ir(small: np.ndarray) -> bool:
 class SilhouettePose:
     """Model-free raised-arm detector on a motion/background silhouette."""
 
-    def __init__(self, bg_len=24, bg_every=1, bg_min=4, fg_thr=26.0, min_person_h_frac=0.12,
+    def __init__(self, bg_len=30, bg_every=2, bg_min=4, fg_thr=26.0, min_person_h_frac=0.12,
                  max_angle_deg=65.0, min_excursion=0.9):
         self.buf = deque(maxlen=int(bg_len))
         self.bg_every = max(1, int(bg_every))
@@ -129,7 +132,7 @@ class SilhouettePose:
 
     def push(self, small: np.ndarray):
         self._count += 1
-        if self._count % self.bg_every == 0:
+        if len(self.buf) < self.bg_min or self._count % self.bg_every == 0:
             self.buf.append(small.copy())
             # the median is the expensive part (~40 ms for 24 x 400 px frames): refresh every 3rd push
             # once the buffer is warm
@@ -159,7 +162,44 @@ class SilhouettePose:
         if res.get("tip") is not None:
             res["tip"] = [res["tip"][0] + x, res["tip"][1] + y]
             res["attach"] = [res["attach"][0] + x, res["attach"][1] + y]
+        if not res.get("pointing"):
+            arm = self._arm_only(lab, st, n, small, ir)
+            if arm is not None:
+                res.update(arm)
         return res
+
+    def _arm_only(self, lab, st, n, small, ir) -> Optional[dict]:
+        """A person who sat still for minutes is part of the median background; then only the moving
+        arm shows up. Accept an isolated, very elongated blob (a straight arm, length/width >= 4.5)
+        tilted <= max_angle from vertical with a hand (skin / bright IR skin) at its upper end."""
+        h, w = lab.shape
+        best = None
+        for i in range(1, n):
+            x, y, bw, bh, area = st[i]
+            if area < 30 or max(bw, bh) < 0.06 * h or max(bw, bh) > 0.45 * h:
+                continue
+            py, px = np.nonzero(lab[y:y + bh, x:x + bw] == i)
+            pts = np.stack([px + x, py + y], 1).astype(np.float32)
+            ev, evec = np.linalg.eigh(np.cov((pts - pts.mean(0)).T))
+            elong = float(np.sqrt(max(ev[-1], 1e-6) / max(ev[0], 1e-6)))
+            if elong < 4.5:
+                continue
+            axis = evec[:, -1] * (1 if evec[1, -1] < 0 else -1)        # oriented upwards (y down)
+            ang = _angle_from_vertical(float(axis[0]), float(axis[1]))
+            if ang > self.max_angle:
+                continue
+            u = (pts - pts.mean(0)) @ axis
+            tip = pts[int(np.argmax(u))]
+            base = pts[int(np.argmin(u))]
+            width = max(1.0, 4.0 * float(np.sqrt(max(ev[0], 1e-6))))
+            if not self._hand_cue(small, tip, 1.5 * width, ir):
+                continue
+            cand = {"pointing": True, "angle": ang, "side": "left" if tip[0] < base[0] else "right",
+                    "tip": tip.tolist(), "attach": base.tolist(), "elong": elong, "hand_cue": True,
+                    "arm_only": True, "n_arms_up": 1, "bbox_small": [int(x), int(y), int(x + bw), int(y + bh)]}
+            if best is None or elong > best["elong"]:
+                best = cand
+        return best
 
     def _pose_from_blob(self, blob: np.ndarray, rgb: np.ndarray, ir: bool) -> dict:
         Hb, Wb = blob.shape
@@ -304,7 +344,7 @@ class GestureAnalyzer(Analyzer):
     min_interval_s = 0.0
 
     DEFAULTS = {"work_w": 400, "pose_model_path": None, "num_poses": 3, "max_angle_deg": 65.0,
-                "bg_len": 24, "bg_every": 1, "bg_min": 4, "fg_thr": 26.0, "min_person_h_frac": 0.12,
+                "bg_len": 30, "bg_every": 2, "bg_min": 4, "fg_thr": 26.0, "min_person_h_frac": 0.12,
                 "min_excursion": 0.9, "max_gap_frames": 1, "trigger_ttl_s": 60.0, "frame_interval_s": None}
 
     def __init__(self, config=None):
@@ -409,16 +449,16 @@ class GestureAnalyzer(Analyzer):
         lat_sig = float(getattr(clock, "latency_sigma_s", 0.0) or 0.0)
         gap = (frame.real_ts - prev[0]).total_seconds() if prev else float(self.p["frame_interval_s"] or 5.0)
         unc = 0.5 * gap + lat_sig
-        conf = 0.35 if self.method == "fallback" else 0.55
+        conf = (0.25 if r.get("arm_only") else 0.35) if self.method == "fallback" else 0.55
         conf += 0.1 if r.get("elong", 0) >= 2.5 or self.method == "mediapipe" else 0.0
         conf += 0.1 if r.get("hand_cue") else 0.0
         conf -= 0.1 if r.get("n_arms_up", 1) >= 2 else 0.0
-        conf = float(np.clip(conf, 0.1, 0.8))
+        conf = round(float(np.clip(conf, 0.1, 0.35 if r.get("arm_only") else 0.8)), 3)
         value = {"arm_angle_deg_from_vertical": round(angle, 1), "side": side, "bbox": bbox, "method": self.method,
                  "phase": "onset", "onset_window": [iso(prev[0]) if prev else None, iso(frame.real_ts)],
                  "capture_ts": iso(frame.capture_ts), "ts_uncertainty_s": round(unc, 1), "latency_s": lat,
                  "latency_sigma_s": lat_sig, "sampling_gap_s": round(gap, 2), "both_arms": r.get("n_arms_up", 1) >= 2,
-                 "hand_cue": bool(r.get("hand_cue")), "ir_mode": ir,
+                 "hand_cue": bool(r.get("hand_cue")), "arm_only": bool(r.get("arm_only")), "ir_mode": ir,
                  "world_hint": self._world_hint(angle, side)}
         if r.get("elbow_deg") is not None:
             value["elbow_deg"] = round(float(r["elbow_deg"]), 1)
