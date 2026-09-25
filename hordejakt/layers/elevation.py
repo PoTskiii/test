@@ -58,7 +58,7 @@ def build(grid, cfg):
     ll_se = grid.paint_points(lat, lon, ll_se_pts, fill=np.nan)
 
     return [
-        LayerResult("elevation_band_810_891", ll_elev, reliability=0.65, independence_group="elevation_hint",
+        LayerResult("elevation_band_810_891", ll_elev, reliability=float(cfg.get("elevation_reliability", 0.5)), independence_group="elevation_hint",
                     description="HORDEMINUS -> 2.7 Eiffel towers -> 810/875/891 m a.s.l. (Horde AI in app, 24.09); hoyde891.json cells",
                     sources=["Horde AI «2,7 eiffeltårn stablet oppå hverandre»", "MagnusPladsen hoyde891.json (Kartverket DTM)"]),
         LayerResult("walk_distance_from_road", ll_road, reliability=0.55, independence_group="road_access",

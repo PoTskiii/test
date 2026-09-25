@@ -23,10 +23,11 @@ BASE = {"p_monday_pickup": 0.5, "defaultno_variant": "utenfly"}
 # (name, weight, cfg-delta). 'reliability' deltas override layer reliabilities.
 SCENARIOS = [
     ("base", 3.0, {}),
-    ("elevation_literal", 2.0, {"reliability": {"elevation_band_810_891": 0.9}}),
-    ("elevation_not_elevation", 1.0, {"reliability": {"elevation_band_810_891": 0.1}}),
-    ("monday_pickup", 1.5, {"p_monday_pickup": 0.95}),
-    ("sunday_pickup", 1.5, {"p_monday_pickup": 0.05}),
+    ("elevation_literal", 1.5, {"reliability": {"elevation_band_810_891": 0.9}}),
+    ("elevation_not_elevation", 1.5, {"reliability": {"elevation_band_810_891": 0.05}}),
+    ("monday_pickup", 1.0, {"p_monday_pickup": 0.95, "reliability": {"drive_time_from_oslo": 0.6}}),
+    ("sunday_pickup", 1.0, {"p_monday_pickup": 0.05}),
+    ("no_organizer_prior", 0.75, {"reliability": {"organizer_region_prior": 0.05}}),
     ("no_se_approach", 1.0, {"reliability": {"road_to_southeast": 0.05}}),
     ("aircraft_strong", 1.0, {"reliability": {"aircraft_2109_2129_point": 0.9, "aircraft_2209_2034_follow": 0.85,
                                               "aircraft_2209_2032_flyy": 0.6, "aircraft_2509_1722_point": 0.6}}),

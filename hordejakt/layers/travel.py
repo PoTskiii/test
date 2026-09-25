@@ -5,6 +5,8 @@ The stream started Monday 21.09 ~06:50. Whiteboard says she was picked up on
   * Monday pickup  -> drive + walk + setup <= ~2 h 50 min -> drive <~ 2.5 h
   * Sunday pickup  -> she guessed ~7 h but slept most of the way: broad 1-8.5 h
 Mixture weighted by cfg['p_monday_pickup'] (default 0.5).
+Alf (Børsen/TikTok 25.09): she was driven around for hours on purpose, then
+carried into the forest -> drive time is weak evidence (reliability 0.3).
 
 Source: MagnusPladsen drivetime.json — OSRM car time from Oslo sentrum on a
 0.1° x 0.2° lattice (fields lat, lon, sek, meter, snap_m).
@@ -34,6 +36,6 @@ def build(grid, cfg):
     lik = p_mon * mon / 2.5 + (1 - p_mon) * sun / 7.5  # normalise each hypothesis by its width
     ll = np.log(lik + 1e-6)
     ll = np.where(np.isnan(hours), np.nan, ll)
-    return [LayerResult("drive_time_from_oslo", ll, reliability=0.7, independence_group="travel",
+    return [LayerResult("drive_time_from_oslo", ll, reliability=float(cfg.get("travel_reliability", 0.3)), independence_group="travel",
                         description=f"OSRM drive time from Oslo; mixture Monday-pickup (<=2.5 h) p={p_mon} / Sunday-pickup (1-8.5 h)",
                         sources=["tavla: hentet i Oslo kl 04:00 (søndag)", "Børsen: «siden mandag morgen»", "OSRM via drivetime.json"])]
