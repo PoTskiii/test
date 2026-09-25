@@ -1495,16 +1495,17 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
                     obs, evs, cur_o, cur_e, fmax, cal, backlog = await run_in_threadpool(store.poll, cur_o, cur_e, kinds_)
                     # every data message carries the cursor *up to and including itself*, so a reconnect
                     # (Last-Event-ID) after any message neither skips nor repeats rows
-                    for o in obs:
-                        yield _sse("observation", o, f"o{o['id']}.e{prev_e}")
-                        sent += 1
-                    for e in evs:
-                        yield _sse("event", e, f"o{cur_o}.e{e['id']}")
-                        sent += 1
+                    cap = max_events - sent if max_events is not None else None
+                    msgs = ([("observation", o, f"o{o['id']}.e{prev_e}") for o in obs]
+                            + [("event", e, f"o{cur_o}.e{e['id']}") for e in evs])
                     for seq, name, data in store.bus.since(bus_seq):
                         bus_seq = seq
-                        yield _sse(name, data)
-                        if name == "event_update":
+                        msgs.append((name, data, None))
+                    if cap is not None and len(msgs) > cap:
+                        msgs = msgs[:cap]       # hard cap; every message carries its own resume cursor
+                    for name, data, mid in msgs:
+                        yield _sse(name, data, mid)
+                        if name in ("observation", "event", "event_update"):
                             sent += 1
                     now = time.monotonic()
                     if cal_stamp is None:

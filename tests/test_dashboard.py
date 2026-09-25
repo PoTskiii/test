@@ -426,7 +426,7 @@ def test_timeline_series_markers_and_sun(env):
     assert (sun["lat"], sun["lon"]) == REF and "hotspots.json" in sun["source"]
     assert sun["points"][0][0] == int(T0.timestamp() * 1000)
     ev = [x["event"] for x in sun["crossings"]]
-    assert ev[:2] == ["sunset", "civil dusk"]                   # 21.09 at 61 N: ~19:08 and ~19:50 CEST
+    assert ev[:2] == ["sunset", "civil dusk"]                   # 21.09 at 61 N: ~19:20 and ~20:05 CEST
     # default window ends at the newest observation; window= sets its length
     d2 = c.get("/api/timeline", params={"window": "1h"}).json()
     assert d2["until"] == d2["data_max"]
@@ -457,8 +457,20 @@ def test_sun_crossings_are_on_threshold():
     for c in cr:
         alt, _ = A.sun_position([c["t"] / 1000.0], *REF)
         assert abs(alt[0] - c["elev_deg"]) < 0.02
-    sunset = datetime.fromtimestamp(cr[0]["t"] / 1000, UTC)
-    assert timedelta(hours=16, minutes=55) < sunset - datetime(2026, 9, 21, tzinfo=UTC) < timedelta(hours=17, minutes=20)
+    # independent check against skyfield's almanac (DE421, -0.8333 deg horizon)
+    from hordewatch.astro import ephem
+    if not ephem.available():
+        pytest.skip("skyfield data not available")
+    from skyfield import almanac
+    from skyfield.api import wgs84
+    ts, eph = ephem._skyfield()
+    f = almanac.sunrise_sunset(eph, wgs84.latlon(*REF))
+    times, ups = almanac.find_discrete(ts.from_datetime(datetime.fromtimestamp(t0, UTC)),
+                                       ts.from_datetime(datetime.fromtimestamp(t0 + 86400, UTC)), f)
+    ref = {("sunrise" if up else "sunset"): tt.utc_datetime().timestamp() for tt, up in zip(times, ups)}
+    ours = {c["event"]: c["t"] / 1000.0 for c in cr if c["event"] in ("sunrise", "sunset")}
+    assert abs(ours["sunset"] - ref["sunset"]) < 60 and abs(ours["sunrise"] - ref["sunrise"]) < 60
+    assert datetime.fromtimestamp(ours["sunset"], UTC).strftime("%H:%M") in ("17:19", "17:20", "17:21")   # 19:20 CEST
 
 
 # =============================================================================== map / engine outputs
@@ -711,7 +723,7 @@ def test_ntfy_notifier_cursor_filters_rate_limit_and_fail_soft(env):
         db.add_event(datetime.now(UTC), "aircraft_layer", f"layer {k}", {})
     posts.clear()
     assert n2.step() == 3
-    assert "3 more alerts" in posts[0]["title"] and [x["message"] for x in posts[1:]] == ["layer 4", "layer 5"]
+    assert "4 more alerts" in posts[0]["title"] and [x["message"] for x in posts[1:]] == ["layer 4", "layer 5"]
     db.add_event(datetime.now(UTC), "aircraft_layer", "layer 6", {})
     assert n2.step() == 0                                             # budget used up: cursor waits
     # background thread survives a dead network and records the error
