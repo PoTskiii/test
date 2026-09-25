@@ -1,0 +1,8 @@
+# third-party mirrors (fetched by scripts/sync_sources.sh; no redistribution licence)
+data/raw/
+data/cache/
+.venv/
+__pycache__/
+*.pyc
+output/cache/
+output/*.npz
