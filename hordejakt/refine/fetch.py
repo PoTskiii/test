@@ -225,7 +225,8 @@ def check_hosts(hosts=None, timeout=8):
 
 def blocked_message(hosts):
     lines = ["Network access is blocked for the data hosts this step needs. Allow these hosts",
-             "(Claude Code on the web: environment settings -> network access -> allowed domains):"]
+             "(Claude Code on the web: cloud environment menu in the session title bar -> Edit ->",
+             " Network access: add them to the allowed domains, or pick a broader access level):"]
     for h in sorted(set(hosts)):
         lines.append(f"  - {h:24s} {HOSTS.get(h, '')}")
     lines.append("Everything fetched is cached in data/cache/, so a later offline run reuses it.")
