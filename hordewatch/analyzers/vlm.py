@@ -38,12 +38,23 @@ Outputs
   * scene job -> low-confidence structured kinds that other fusers can use:
     ``cloud_fraction`` (method 'vlm'), ``fog``, ``rain_visual``, ``direct_sun``,
     ``gesture_point_up`` (arm angle unknown: None; triggers 'aircraft_check'),
-    ``object_appeared`` (label from the model, bbox None). ``ctx.state['vlm_scene']``
-    holds the last parsed scene.
+    ``object_appeared`` (label from the model, bbox None; a label already listed within
+    ``objects_repeat_s`` is not re-reported, ``hands_or_signs_near_box`` only on a false->true
+    transition). ``ctx.state['vlm_scene']`` holds the last parsed scene.
 
 Robust parsing
   :func:`extract_json` pulls the first balanced JSON object out of chatty output
   (code fences, prose, trailing commas, single quotes, Python literals).
+
+Housekeeping
+  * ``lazy_connect`` re-pings run on a background thread, so ``on_frame`` never waits on a dead
+    server (the ping itself can take 2 x ping_timeout_s with backend 'auto').
+  * The ``aircraft_check`` trigger raised by a VLM "pointing_up" answer is a pulse (``trigger_ttl_s``):
+    nothing consumes it, and the runner force-runs every analyzer while any trigger is set.
+  * Board de-duplication re-reads the ``whiteboard_text`` rows from the DB for every VLM board answer
+    (rare), so a board the OCR analyzer already announced in this run is not announced twice.
+    A prose (non-JSON) answer, an illegible board or a transcription with fewer than 2
+    letters/digits ("???") is recorded but never announced as an event.
 
 Failure modes / caveats
   Small VLMs hallucinate - confidences are capped low (<= 0.6 for transcriptions,
@@ -71,6 +82,7 @@ import numpy as np
 
 from ..types import Observation, iso
 from .base import Analyzer, Context
+from .whiteboard import as_rgb_u8, expire_pulses, pulse_trigger
 
 log = logging.getLogger("hordewatch.vlm")
 
@@ -107,6 +119,9 @@ Describe ONLY what is actually visible. Answer with ONLY this JSON object and no
  "notable": "anything unusual in one sentence, or empty"}"""
 
 _SKY_FRACTION = {"clear": 0.05, "partly": 0.5, "overcast": 0.95, "fog": 1.0}
+# prose answers that are not a transcription (model refused / saw nothing)
+_REFUSAL_RE = re.compile(r"\b(cannot|can't|can not|unable|sorry|no (visible |readable )?text|not (legible|readable)"
+                         r"|i'm|i am|as an ai|the image (shows|contains|depicts))\b", re.I)
 
 
 # ------------------------------------------------------------------------------------------ JSON
@@ -234,6 +249,7 @@ def _http_json(url, payload=None, timeout=10.0, use_proxy_env=False, api_key=Non
 
 
 def _encode_jpeg(rgb: np.ndarray, quality=85) -> str:
+    rgb = as_rgb_u8(rgb)
     ok, buf = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
     if not ok:
         raise RuntimeError("jpeg encode failed")
@@ -327,7 +343,8 @@ class VLMAnalyzer(Analyzer):
                 "scene_every_s": 600.0, "timeout_s": 180.0, "ping_timeout_s": 2.0, "max_side": 1024,
                 "board_max_side": 1024, "jpeg_quality": 85, "queue_max": 4, "temperature": 0.0,
                 "max_tokens": 512, "keep_alive": "30m", "use_proxy_env": False, "api_key": None,
-                "dedup_sim": 0.8, "fail_backoff_s": 300.0, "lazy_connect": False, "reping_s": 300.0}
+                "dedup_sim": 0.8, "fail_backoff_s": 300.0, "lazy_connect": False, "reping_s": 300.0,
+                "trigger_ttl_s": 60.0, "max_state_boards": 50, "objects_repeat_s": 3 * 3600.0}
 
     def __init__(self, config=None):
         super().__init__(config)
@@ -347,10 +364,15 @@ class VLMAnalyzer(Analyzer):
         self._last_scene_ts: Optional[datetime] = None
         self._fails = 0
         self._backoff_until = 0.0
-        self._known_boards = None
+        self._own_boards: list = []
         self._available = None
         self._connected = True
         self._last_ping = 0.0
+        self._pinging: Optional[threading.Thread] = None
+        self._last_frame_ts: Optional[datetime] = None
+        self._last_frame_index: Optional[int] = None
+        self._seen_objects: dict = {}         # normalised label -> last real ts it was listed
+        self._near_box = False
 
     # ------------------------------------------------------------------ lifecycle
     def available(self) -> bool:
@@ -375,13 +397,21 @@ class VLMAnalyzer(Analyzer):
         return self._available
 
     def _server_ok(self) -> bool:
+        """Non-blocking: a re-ping (lazy_connect) runs on its own thread; the answer is used on a later call."""
         if self._connected:
             return True
-        if time.monotonic() - self._last_ping >= float(self.p["reping_s"]):
+        busy = self._pinging is not None and self._pinging.is_alive()
+        if not busy and time.monotonic() - self._last_ping >= float(self.p["reping_s"]):
             self._last_ping = time.monotonic()
-            self._connected = self.client.ping()
-            if self._connected:
-                log.info("VLM server %s is now reachable", self.client.url)
+
+            def _ping():
+                if self.client.ping():
+                    self._connected = True
+                    log.info("VLM server %s is now reachable", self.client.url)
+                self._last_ping = time.monotonic()
+
+            self._pinging = threading.Thread(target=_ping, name="hordewatch-vlm-ping", daemon=True)
+            self._pinging.start()
         return self._connected
 
     def _ensure_worker(self):
@@ -467,6 +497,9 @@ class VLMAnalyzer(Analyzer):
                 return False
 
     def on_frame(self, frame, ctx: Context):
+        expire_pulses(ctx, frame.real_ts, frame.index)
+        self._last_frame_ts = frame.real_ts
+        self._last_frame_index = frame.index
         out = self._drain(ctx)
         if not self._server_ok():
             ctx.consume("whiteboard")
@@ -480,6 +513,8 @@ class VLMAnalyzer(Analyzer):
             if isinstance(crop, np.ndarray) and wb.get("ts") is not None:
                 bmeta["ts"] = wb["ts"]                       # the frame the crop was cut from
                 bmeta["frame_id"] = wb.get("frame_id", frame.id)
+                # keep (ts, ts_capture) a consistent pair: bridges recover capture time from ts_capture
+                bmeta["ts_capture"] = wb.get("capture_ts") or (frame.capture_ts - (frame.real_ts - wb["ts"]))
             job = {"kind": "whiteboard", "prompt": WHITEBOARD_PROMPT, "track_id": wb.get("track_id"),
                    "image": _downscale(img, self.p["board_max_side"]), "bbox": wb.get("bbox"), **bmeta}
             self._submit(job)
@@ -534,15 +569,14 @@ class VLMAnalyzer(Analyzer):
             text = "\n".join(lines)
         if not lines and text:
             lines = [l.strip() for l in text.splitlines() if l.strip()]
+        prose = False
         if not text and not parsed and job.get("answer"):
             text = job["answer"].strip()          # model ignored the JSON instruction
             lines = [l.strip() for l in text.splitlines() if l.strip()]
-        try:
-            from .whiteboard import board_similarity, fix_norwegian
-            lines = [fix_norwegian(l)[0] for l in lines]
-            text = "\n".join(lines) if lines else text
-        except Exception:  # pragma: no cover
-            board_similarity = None
+            prose = True
+        from .whiteboard import board_similarity, fix_norwegian, text_key
+        lines = [fix_norwegian(l)[0] for l in lines]
+        text = "\n".join(lines) if lines else text
         legible = _as_bool(parsed.get("legible"))
         try:
             mconf = float(parsed.get("confidence"))
@@ -550,9 +584,15 @@ class VLMAnalyzer(Analyzer):
             mconf = 0.5
         if not text.strip():
             return []
+        if prose and _REFUSAL_RE.search(text):
+            log.info("VLM board answer is a refusal/prose, not a transcription: %r", text[:120])
+            return []
         conf = float(np.clip(0.25 + 0.35 * np.clip(mconf, 0, 1), 0.1, 0.6)) * (0.5 if legible is False else 1.0)
+        if prose:
+            conf = min(conf, 0.2)
         is_new = None
-        if board_similarity is not None and legible is not False:
+        # only a structured, legible transcription with some real content can be announced
+        if legible is not False and not prose and len(text_key(text)) >= 2:
             known = self._known_board_texts(ctx)
             best = max((board_similarity(text, k) for k in known), default=0.0)
             is_new = best < float(self.p["dedup_sim"])
@@ -564,24 +604,29 @@ class VLMAnalyzer(Analyzer):
                                       "track_id": job.get("track_id")})
                 except Exception as e:  # pragma: no cover
                     log.warning("VLM add_event failed: %s", e)
-            self._known_boards.append(text)
-        ctx.state.setdefault("vlm_whiteboard", {})[job.get("track_id")] = {"text": text, "ts": job["ts"]}
+            self._own_boards.append(text)
+            del self._own_boards[:-200]
+        vw = ctx.state.setdefault("vlm_whiteboard", {})
+        vw[job.get("track_id")] = {"text": text, "ts": job["ts"]}
+        while len(vw) > int(self.p["max_state_boards"]):          # bounded over a multi-day run
+            vw.pop(next(iter(vw)))
         value = {"text": text, "lines": lines, "lang": parsed.get("language") or "nb", "ocr_conf": None,
                  "vlm_text": text, "source": "vlm", "model": self.client.model, "legible": legible,
                  "model_confidence": mconf, "drawings": parsed.get("drawings") or "", "track_id": job.get("track_id"),
-                 "bbox": job.get("bbox"), "is_new": is_new}
+                 "bbox": job.get("bbox"), "is_new": is_new, "structured": not prose}
         return [self._obs("whiteboard_text", job, value, conf, notes="vlm transcription")]
 
     def _known_board_texts(self, ctx):
-        if self._known_boards is None:
-            self._known_boards = []
-            if ctx.db is not None:
-                try:
-                    self._known_boards = [o["value"].get("text", "") for o in ctx.db.observations(kind="whiteboard_text")
-                                          if (o["value"] or {}).get("text")]
-                except Exception:  # pragma: no cover
-                    pass
-        return self._known_boards
+        """Every board text known so far: all whiteboard_text rows in the DB (OCR and VLM, re-read each
+        time - board answers are rare) plus this analyzer's own texts (for runs without a DB)."""
+        texts = []
+        if ctx.db is not None:
+            try:
+                texts = [o["value"].get("text", "") for o in ctx.db.observations(kind="whiteboard_text")
+                         if (o["value"] or {}).get("text")]
+            except Exception as e:  # pragma: no cover
+                log.debug("VLM: could not read earlier boards: %s", e)
+        return texts + list(self._own_boards)
 
     def _scene_obs(self, job, p, ctx):
         out = []
@@ -606,14 +651,31 @@ class VLMAnalyzer(Analyzer):
             out.append(self._obs("gesture_point_up", job, {"arm_angle_deg_from_vertical": None, "side": None,
                                                            "bbox": None, "activity": p.get("anja_activity"), **base},
                                  0.3))
-            ctx.trigger("aircraft_check")
+            # the answer arrives 10-120 s after the frame: the pulse starts now (latest frame time), not at job ts
+            pulse_trigger(ctx, "aircraft_check", self._last_frame_ts or job["ts"], float(self.p["trigger_ttl_s"]),
+                          self._last_frame_index)
             ctx.state.setdefault("aircraft_check_requests", []).append(
                 {"ts": iso(job["ts"]), "source": "vlm", "frame_id": job.get("frame_id")})
             del ctx.state["aircraft_check_requests"][:-50]
+        # a VLM lists the same persistent things (the box, a sign that has stood there for days) in every
+        # scene report: only a label not reported within objects_repeat_s is an 'appeared' object
+        now = job["ts"]
+        rep_s = float(self.p["objects_repeat_s"])
         for label in _as_list(p.get("objects_new"))[:5]:
+            key = re.sub(r"[^a-z0-9æøå]+", " ", label.lower()).strip()
+            last = self._seen_objects.get(key)
+            self._seen_objects[key] = now
+            if last is not None and 0 <= (now - last).total_seconds() < rep_s:
+                continue
             out.append(self._obs("object_appeared", job, {"label": label, "bbox": None, "appeared": True, **base}, 0.2))
-        if _as_bool(p.get("hands_or_signs_near_box")):
+        if len(self._seen_objects) > 500:
+            for k in sorted(self._seen_objects, key=self._seen_objects.get)[:len(self._seen_objects) - 500]:
+                del self._seen_objects[k]
+        near = _as_bool(p.get("hands_or_signs_near_box"))
+        if near and not self._near_box:                       # report the transition, not every report
             out.append(self._obs("object_appeared", job, {"label": "hands_or_signs_near_box", "bbox": None,
                                                           "appeared": True, "signs_text": _as_list(p.get("signs_text")),
                                                           **base}, 0.25))
+        if near is not None:
+            self._near_box = near
         return out

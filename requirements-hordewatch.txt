@@ -6,6 +6,8 @@
 #                            env HORDEWATCH_POSE_MODEL); download once from
 #                            https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
 #   local VLM server (not pip): `ollama serve` + `ollama pull llava:7b` (or llama.cpp llama-server --mmproj, vlm.backend: openai)
+#   tzdata                 (Windows only: IANA zone database for Europe/Oslo; without it the whiteboard clock_seen
+#                            uses a built-in EU summer-time rule, which is equivalent for Norway)
 # --- hordewatch astro (sun / moon / stars / twilight) ---
 # required (already in the venv): numpy, scipy, skyfield, skyfield-data (bundles de421.bsp + finals: no downloads),
 #   astropy (FITS for astrometry.net), opencv-python-headless (plumb-line detector, homography)
@@ -24,3 +26,16 @@
 # optional: skyfield + skyfield-data (bundled de421.bsp) - moon altitude / illuminated fraction for moon_pixel
 #   gating in the night analyzer; without it every round saturated disk in the sky is reported (lower confidence)
 # no model downloads, no network; the solar position (NOAA algorithm, ~0.01 deg) is built in
+# --- hordewatch dashboard (python -m hordewatch.dashboard; scripts/hordewatch_all.sh) ---
+# fastapi + uvicorn serve the JSON/SSE API and static/index.html; httpx is only needed by the tests.
+# The page loads Leaflet from cdn.jsdelivr.net (map tab only; everything else works offline).
+fastapi>=0.110
+uvicorn>=0.29
+httpx>=0.27
+# --- hordewatch audio (audio_events / audio_loop / birds) ---
+# required (already in the venv): numpy, scipy (STFT helpers, least_squares pass-by fit, filters). No new packages.
+#   audio_loop keeps its landmark-fingerprint index in SQLite at <db dir>/fp/audio_fp.sqlite (~60 MB/day,
+#   retention_h 168 by default)
+# optional, BirdNET species ID for the `birds` analyzer (heavy; not installed in the dev container):
+#   birdnetlib  +  tflite-runtime (or tensorflow / ai-edge-litert)  +  librosa
+#   e.g.  pip install birdnetlib tflite-runtime      (BirdNET-Analyzer 2.4 model is bundled in the birdnetlib wheel)

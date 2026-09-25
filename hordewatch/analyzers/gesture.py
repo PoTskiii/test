@@ -51,7 +51,18 @@ Output
 Timing caveats: frames are sampled every ``frame_interval_s`` (5 s), so a brief
 point can be missed and the onset is only known within the sampling gap; the
 real-time estimate inherits the stream latency uncertainty (StreamClock). For
-aircraft matching use onset_window widened by ts_uncertainty_s.
+aircraft matching use onset_window widened by ts_uncertainty_s. ``latency_s`` in
+the value is the latency actually applied to *this* frame (capture_ts -
+real_ts: PDT-measured or StreamClock), and ``timing`` is the ingest's timing
+method when known. Both observations of an episode carry the onset frame's
+(ts, ts_capture) pair - the ADS-B bridge clusters on ts_capture, so a summary
+stamped at the end of a long episode would become a second, wrong sighting.
+
+Robustness: the background buffer is reset when the source size changes
+(adaptive bitrate: 720p -> 144p) or the camera switches day <-> IR (2-frame
+hysteresis), since a median over mixed frames is meaningless; grey/RGBA/float
+frames are coerced to RGB uint8; the per-episode angle track is capped.
+``aircraft_check`` is a pulse withdrawn after ``trigger_ttl_s`` of stream time.
 
 Failure modes (fallback): a person who has been motionless for minutes becomes
 part of the background median (only the moving arm then shows - handled by the
@@ -71,6 +82,7 @@ import numpy as np
 
 from ..types import Observation, iso
 from .base import Analyzer, Context
+from .whiteboard import as_rgb_u8, expire_pulses, pulse_trigger
 
 log = logging.getLogger("hordewatch.gesture")
 
@@ -81,6 +93,13 @@ def _angle_from_vertical(vx: float, vy: float) -> float:
     if n < 1e-6:
         return 180.0
     return float(np.degrees(np.arccos(np.clip(-vy / n, -1, 1))))
+
+
+def _inside_frac(a, b) -> float:
+    """Fraction of box a's area inside box b (boxes x0, y0, x1, y1)."""
+    iw = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    ih = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    return iw * ih / max((a[2] - a[0]) * (a[3] - a[1]), 1e-6)
 
 
 def _is_ir(small: np.ndarray) -> bool:
@@ -103,6 +122,7 @@ class SilhouettePose:
         self.max_angle = float(max_angle_deg)
         self.min_excursion = float(min_excursion)
         self._count = 0
+        self._pushes = 0
         self._bg = None
         self._bg_dirty = True
 
@@ -113,6 +133,8 @@ class SilhouettePose:
         return self._bg
 
     def foreground(self, small: np.ndarray) -> Optional[np.ndarray]:
+        if self.buf and self.buf[-1].shape != small.shape:
+            self.reset()                     # stream resolution changed: the old background is useless
         if len(self.buf) < self.bg_min:
             return None
         bg = self._background()
@@ -130,16 +152,28 @@ class SilhouettePose:
         cv2.drawContours(filled, cnts, -1, 1, -1)
         return filled.astype(bool)
 
+    def reset(self):
+        self.buf.clear()
+        self._bg = None
+        self._bg_dirty = True
+        self._pushes = 0
+
     def push(self, small: np.ndarray):
         self._count += 1
+        if self.buf and self.buf[-1].shape != small.shape:
+            self.reset()
         if len(self.buf) < self.bg_min or self._count % self.bg_every == 0:
             self.buf.append(small.copy())
+            self._pushes += 1
             # the median is the expensive part (~40 ms for 24 x 400 px frames): refresh every 3rd push
             # once the buffer is warm
-            if len(self.buf) <= self.bg_min + 1 or len(self.buf) % 3 == 0 or self._bg is None:
+            if len(self.buf) <= self.bg_min + 1 or self._pushes % 3 == 0 or self._bg is None:
                 self._bg_dirty = True
 
-    def analyze(self, small: np.ndarray, ir: bool) -> Optional[dict]:
+    def analyze(self, small: np.ndarray, ir: bool, not_person=()) -> Optional[dict]:
+        """``not_person``: boxes (working px) of known non-person foreground - the held-up whiteboard.
+        A blob lying >= 70 % inside one is not taken as the person (a big bright board otherwise wins
+        the largest-blob vote and person_bbox points at the board, not at her)."""
         fg = self.foreground(small)
         self.push(small)
         if fg is None:
@@ -150,6 +184,8 @@ class SilhouettePose:
         for i in range(1, n):
             x, y, bw, bh, area = st[i]
             if bh < self.min_person_h_frac * h or area < 0.002 * h * w:
+                continue
+            if any(_inside_frac((x, y, x + bw, y + bh), b) >= 0.7 for b in not_person):
                 continue
             if best is None or area > st[best][4]:
                 best = i
@@ -345,7 +381,8 @@ class GestureAnalyzer(Analyzer):
 
     DEFAULTS = {"work_w": 400, "pose_model_path": None, "num_poses": 3, "max_angle_deg": 65.0,
                 "bg_len": 30, "bg_every": 2, "bg_min": 4, "fg_thr": 26.0, "min_person_h_frac": 0.12,
-                "min_excursion": 0.9, "max_gap_frames": 1, "trigger_ttl_s": 60.0, "frame_interval_s": None}
+                "min_excursion": 0.9, "max_gap_frames": 1, "trigger_ttl_s": 60.0, "frame_interval_s": None,
+                "max_track": 240, "ir_hysteresis": 2}
 
     def __init__(self, config=None):
         super().__init__(config)
@@ -373,8 +410,9 @@ class GestureAnalyzer(Analyzer):
         self._episode = None
         self._prev_frame = None          # (real_ts, capture_ts) of the previous frame
         self._gap = 0
-        self._trigger_ts = None
         self._last_n_persons = None
+        self._ir_mode = None
+        self._ir_votes = 0
 
     def available(self) -> bool:
         log.info("gesture: using %s detector", self.method)
@@ -392,26 +430,49 @@ class GestureAnalyzer(Analyzer):
         return {"az_deg": round(az, 1), "elev_deg": round(max(0.0, 90 - angle), 1),
                 "assumption": f"arm in the image plane; camera heading {heading:.0f} deg; depth component unknown"}
 
-    def _expire_trigger(self, ctx, frame):
-        if self._trigger_ts is None:
-            return
-        if "aircraft_check" not in ctx.triggers:
-            self._trigger_ts = None
-        elif (frame.real_ts - self._trigger_ts).total_seconds() > self.p["trigger_ttl_s"]:
-            ctx.triggers.discard("aircraft_check")     # nobody consumed it; stop forcing all analyzers
-            self._trigger_ts = None
+    @staticmethod
+    def _board_boxes(ctx, s):
+        wbs = ctx.state.get("whiteboard")
+        if isinstance(wbs, dict) and wbs.get("bbox") is not None:
+            try:
+                return [[float(v) * s for v in wbs["bbox"]]]
+            except (TypeError, ValueError):
+                return []
+        return []
+
+    def _regime(self, ir: bool) -> bool:
+        """Day/IR with hysteresis; a confirmed switch resets the fallback background."""
+        if self._ir_mode is None:
+            self._ir_mode = ir
+        elif ir != self._ir_mode:
+            self._ir_votes += 1
+            if self._ir_votes >= int(self.p["ir_hysteresis"]):
+                self._ir_mode, self._ir_votes = ir, 0
+                if isinstance(self.detector, SilhouettePose):
+                    self.detector.reset()
+                    log.info("gesture: camera switched to %s; background reset", "IR" if ir else "day")
+        else:
+            self._ir_votes = 0
+        return ir
 
     # ------------------------------------------------------------------ main
     def on_frame(self, frame, ctx: Context):
-        self._expire_trigger(ctx, frame)
+        expire_pulses(ctx, frame.real_ts, frame.index)
         out = []
-        img = frame.image
+        img = as_rgb_u8(frame.image)
         H, W = img.shape[:2]
-        s = min(1.0, self.p["work_w"] / float(W))
-        small = cv2.resize(img, (int(round(W * s)), int(round(H * s))), interpolation=cv2.INTER_AREA) if s < 1 else img
-        ir = _is_ir(small)
+        if H < 8 or W < 8:
+            return out
+        # fixed working width (up- or down-scaled) so the background survives adaptive-bitrate switches
+        s = self.p["work_w"] / float(W)
+        small = cv2.resize(img, (int(self.p["work_w"]), max(8, int(round(H * s)))),
+                           interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_LINEAR)
+        ir = self._regime(_is_ir(small))
         try:
-            r = self.detector.analyze(small, ir) or {}
+            if isinstance(self.detector, SilhouettePose):
+                r = self.detector.analyze(small, ir, not_person=self._board_boxes(ctx, s)) or {}
+            else:
+                r = self.detector.analyze(small, ir) or {}
         except Exception as e:
             log.warning("gesture detector failed: %s", e)
             r = {}
@@ -434,7 +495,12 @@ class GestureAnalyzer(Analyzer):
             if self._episode is None:
                 out.append(self._onset(frame, ctx, r, bbox, prev, ir))
             else:
-                self._episode["track"].append([iso(frame.real_ts), round(angle, 1), side])
+                tr = self._episode["track"]
+                tr.append([iso(frame.real_ts), round(angle, 1), side])
+                if len(tr) > int(self.p["max_track"]):          # bounded: keep the start, thin the middle
+                    keep = int(self.p["max_track"]) // 2
+                    tr[:] = tr[:keep // 2] + tr[keep // 2:-keep // 2][::2] + tr[-keep // 2:]
+                self._episode["n_frames"] = self._episode.get("n_frames", 1) + 1
                 self._episode["last"] = frame.real_ts
         elif self._episode is not None:
             self._gap += 1
@@ -445,8 +511,11 @@ class GestureAnalyzer(Analyzer):
     def _onset(self, frame, ctx, r, bbox, prev, ir):
         angle, side = float(r["angle"]), r["side"]
         clock = getattr(ctx, "clock", None)
-        lat = float(getattr(clock, "latency_s", 0.0) or 0.0)
+        # the latency actually applied to this frame (PDT-measured or StreamClock), not the clock's current value
+        lat = float((frame.capture_ts - frame.real_ts).total_seconds())
         lat_sig = float(getattr(clock, "latency_sigma_s", 0.0) or 0.0)
+        ing = ctx.state.get("ingest") if isinstance(ctx.state.get("ingest"), dict) else {}
+        timing = ing.get("timing")
         gap = (frame.real_ts - prev[0]).total_seconds() if prev else float(self.p["frame_interval_s"] or 5.0)
         unc = 0.5 * gap + lat_sig
         conf = (0.25 if r.get("arm_only") else 0.35) if self.method == "fallback" else 0.55
@@ -457,15 +526,16 @@ class GestureAnalyzer(Analyzer):
         value = {"arm_angle_deg_from_vertical": round(angle, 1), "side": side, "bbox": bbox, "method": self.method,
                  "phase": "onset", "onset_window": [iso(prev[0]) if prev else None, iso(frame.real_ts)],
                  "capture_ts": iso(frame.capture_ts), "ts_uncertainty_s": round(unc, 1), "latency_s": lat,
-                 "latency_sigma_s": lat_sig, "sampling_gap_s": round(gap, 2), "both_arms": r.get("n_arms_up", 1) >= 2,
+                 "latency_sigma_s": lat_sig, "timing": timing, "sampling_gap_s": round(gap, 2),
+                 "both_arms": r.get("n_arms_up", 1) >= 2,
                  "hand_cue": bool(r.get("hand_cue")), "arm_only": bool(r.get("arm_only")), "ir_mode": ir,
                  "world_hint": self._world_hint(angle, side)}
         if r.get("elbow_deg") is not None:
             value["elbow_deg"] = round(float(r["elbow_deg"]), 1)
-        self._episode = {"start": frame.real_ts, "last": frame.real_ts, "prev": prev,
+        self._episode = {"start": frame.real_ts, "start_capture": frame.capture_ts, "start_frame_id": frame.id,
+                         "last": frame.real_ts, "prev": prev, "n_frames": 1,
                          "track": [[iso(frame.real_ts), round(angle, 1), side]], "value": value}
-        ctx.trigger("aircraft_check")
-        self._trigger_ts = frame.real_ts
+        pulse_trigger(ctx, "aircraft_check", frame.real_ts, self.p["trigger_ttl_s"], frame.index)
         req = ctx.state.setdefault("aircraft_check_requests", [])
         req.append({"ts": iso(frame.real_ts), "onset_window": value["onset_window"], "ts_uncertainty_s": unc,
                     "arm_angle_deg_from_vertical": value["arm_angle_deg_from_vertical"], "side": side,
@@ -485,8 +555,11 @@ class GestureAnalyzer(Analyzer):
         v = dict(ep["value"])
         angles = [t[1] for t in ep["track"]]
         v.update({"phase": "summary", "track": ep["track"], "duration_s": (ep["last"] - ep["start"]).total_seconds(),
-                  "end_window": [iso(ep["last"]), iso(frame.real_ts)],
+                  "n_frames": ep.get("n_frames", len(ep["track"])),
+                  "end_window": [iso(ep["last"]), iso(frame.real_ts)], "end_frame_id": frame.id,
                   "arm_angle_deg_from_vertical": round(float(np.median(angles)), 1),
                   "angle_change_deg": round(angles[-1] - angles[0], 1)})
+        # (ts, ts_capture) of the ONSET frame: a consistent pair, so the summary clusters with its onset
         return [Observation(kind="gesture_point_up", ts=ep["start"], value=v, analyzer=self.name, confidence=0.3,
-                            frame_id=frame.id, ts_capture=frame.capture_ts, notes="episode summary")]
+                            frame_id=ep.get("start_frame_id", frame.id), ts_capture=ep.get("start_capture"),
+                            notes="episode summary")]

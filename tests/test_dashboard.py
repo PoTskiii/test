@@ -7,6 +7,7 @@ import json
 import os
 import re
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -774,3 +775,226 @@ def test_launcher_script_dry_run(tmp_path):
     r3 = subprocess.run([str(sh), "--bogus"], capture_output=True, text=True, env=envv, timeout=60)
     assert r3.returncode == 2
     assert not (tmp_path / "logs").exists()                           # dry run writes nothing
+
+
+# =============================================================================== adversarial review tests
+def test_layer_peaks_match_engine_live_build(env, tmp_path, monkeypatch):
+    """The layers tab must report where hordejakt.layers.live.build (the engine) actually puts each grid.
+    Files are written with the real producer (bridges.common.write_layer) plus hand-made edge cases."""
+    from hordejakt.grid import GRID, Grid
+    from hordejakt.layers import live
+    from hordewatch.bridges.common import write_layer
+    d = tmp_path / "live_layers"
+    # (a) full-GRID layer, peak at a known cell
+    full = np.full(GRID.shape, -3.0)
+    full[GRID.index(61.3, 10.95)] = 4.0
+    write_layer(d / "hw_full.npz", full, name="hw_full", reliability=0.4, independence_group="t_full")
+    # (b) sub-grid written by write_layer (stores lat_min/lon_min/dlat/dlon)
+    sub_g = Grid(lat_min=61.1, lat_max=61.2, lon_min=10.6, lon_max=10.8)
+    sub = np.full(sub_g.shape, -2.0)
+    sub[5, 7] = 3.0
+    write_layer(d / "hw_sub.npz", sub, name="hw_sub", reliability=0.3, independence_group="t_sub", grid=sub_g)
+    # (c) hand-made sub-grid with a *different* cell size: the engine ignores dlat/dlon and pastes it with
+    #     GRID cells, so the evidence lands elsewhere than the file claims
+    ll = np.full((10, 10), -1.0)
+    ll[6, 4] = 2.0
+    np.savez(d / "hw_coarse.npz", loglik=ll, lat_min=61.0, lon_min=10.5, dlat=0.01, dlon=0.02,
+             meta=json.dumps({"name": "hw_coarse", "reliability": 0.2}))
+    # (d) sub-grid whose origin lies outside GRID: the engine skips it
+    np.savez(d / "hw_out.npz", loglik=np.zeros((4, 4)), lat_min=70.0, lon_min=10.0, dlat=0.005, dlon=0.01,
+             meta=json.dumps({"name": "hw_out", "reliability": 0.2}))
+    monkeypatch.setattr(live, "LIVE_DIR", d)
+    engine = {L.name: L for L in live.build(GRID, {})}
+    assert set(engine) == {"hw_full", "hw_sub", "hw_coarse"}                # hw_out skipped by the engine
+
+    app = A.create_app(env["db_path"], env["out"], archive_dir=env["archive"], layers_dir=d, notifier=None)
+    r = TestClient(app).get("/api/layers").json()
+    assert r["engine_dir"] == str(d) and r["engine_reads_this_dir"] is True and r["warning"] is None
+    info = {x["name"]: x for x in r["layers"]}
+    lats, lons = GRID.lats, GRID.lons
+    for name, L in engine.items():
+        i, j = np.unravel_index(np.nanargmax(L.loglik), L.loglik.shape)
+        assert info[name]["peak"]["lat"] == pytest.approx(lats[i], abs=1e-6), name
+        assert info[name]["peak"]["lon"] == pytest.approx(lons[j], abs=1e-6), name
+        assert info[name]["n_cells"] == int(np.isfinite(L.loglik).sum()), name
+        assert info[name]["reliability"] == pytest.approx(L.reliability) and info[name]["used_by_engine"] is True
+    # the coarse file: the naive reading (file's own dlat) would claim 61.06 N 10.58 E - the engine uses 61.03 / 10.54
+    assert info["hw_coarse"]["peak"]["lat"] == pytest.approx(61.03) and info["hw_coarse"]["peak"]["lon"] == pytest.approx(10.54)
+    assert any("cell size" in p for p in info["hw_coarse"]["problems"])
+    assert info["hw_out"]["used_by_engine"] is False and info["hw_out"]["peak"] is None
+    assert info["hw_full"]["problems"] == [] and info["hw_sub"]["problems"] == []
+    # (e) a file without meta makes live.build raise (whole engine run fails): flagged, not shown as fine
+    np.savez(d / "hw_nometa.npz", loglik=np.zeros(GRID.shape))
+    with pytest.raises(KeyError):
+        live.build(GRID, {})
+    bad = {x["file"]: x for x in TestClient(app).get("/api/layers").json()["layers"]}["hw_nometa.npz"]
+    assert bad["engine_ok"] is False and any("engine run fails" in p for p in bad["problems"])
+    # a dashboard pointed at another dir than the engine reads says so
+    monkeypatch.setattr(live, "LIVE_DIR", tmp_path / "elsewhere")
+    assert "do not reach the posterior" in TestClient(app).get("/api/layers").json()["warning"]
+
+
+def test_manual_camera_attitude_reaches_astro_solver_as_entered(env):
+    """The level override must mean to the astro solver exactly what the user typed. The solver merges
+    camera_attitude over {pitch 0+-15, roll 0+-3, heading None} and uses an axis only with its sigma."""
+    from hordewatch.astro.solver import AstroBridge
+    c, db = env["client"], env["db"]
+    # a sigma without its value would silently become 'pitch = 0 +- 0.3 deg' (~33 km of astro-fix bias)
+    r = c.post("/api/calibration", json={"key": "camera_attitude", "value": {"pitch_sigma_deg": 0.3, "roll_deg": 0.2,
+                                                                             "roll_sigma_deg": 0.5}})
+    assert r.status_code == 400 and "pitch" in r.json()["detail"]
+    # a heading without sigma is ignored by the solver: refuse instead of pretending it was applied
+    assert c.post("/api/calibration", json={"key": "camera_attitude", "value": {"heading_deg": 219.6}}).status_code == 400
+    assert db.calibration("camera_attitude") is None
+    assert c.post("/api/calibration", json={"key": "camera_attitude", "value": {
+        "pitch_deg": 1.2, "pitch_sigma_deg": 0.3, "valid_at": "2099-01-01T00:00:00Z"}}).status_code == 400   # future
+    r = c.post("/api/calibration", json={"key": "camera_attitude", "value": {
+        "heading_deg": 219.6, "heading_sigma_deg": 1.5, "pitch_deg": 1.2, "pitch_sigma_deg": 0.3,
+        "valid_at": "2026-09-22T12:00:00+02:00"}})
+    assert r.status_code == 200
+    lev = AstroBridge({"_global": {"camera": {"heading_deg": 220.0, "hfov_deg": 70.0}}})._level(db)
+    assert lev.pitch == (1.2, 0.3) and lev.heading == (219.6, 1.5)
+    assert lev.roll == (0.0, 3.0)                                        # untouched axis keeps the weak default
+    assert lev.att_t == datetime(2026, 9, 22, 10, 0, tzinfo=UTC).timestamp()   # tied to the pose of that time
+    assert "manual (dashboard)" in lev.source
+
+
+def test_implied_attitude_uses_the_solvers_own_camera_convention(env):
+    """astro_camera.G produced by the solver's own ApproxCamera (not re-built with the test's formula)
+    must invert to the attitude it was made from at the reference point."""
+    from hordewatch.astro.stars import ApproxCamera
+    cam = ApproxCamera.from_attitude(221.0, -0.7, 1.3, 0.83, *REF)
+    env["db"].set_calibration("astro_camera", {"method": "stars", "G": [np.asarray(cam.G).tolist()], "f": 0.83})
+    att = env["client"].get("/api/calibration").json()["camera"]["astro_camera"]["implied_attitude"]
+    assert (att["heading_deg"], att["pitch_deg"], att["roll_deg"]) == pytest.approx((221.0, -0.7, 1.3), abs=0.01)
+
+
+def test_timeline_all_window_and_long_range_sun_crossings(env):
+    c = env["client"]
+    d = c.get("/api/timeline", params={"window": "all"}).json()
+    # 'All' = oldest..newest observation (the page used to ask for since=3650d: a 10-year axis)
+    assert d["since"] == d["data_min"] and d["until"] == d["data_max"]
+    assert A.unix_of(d["until"]) - A.unix_of(d["since"]) < 86400
+    assert c.get("/api/timeline", params={"window": "0h"}).status_code == 400
+    # crossings stay exact over years (the old fixed 20000-point grid sampled every ~53 min over 2 years)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
+    t1 = t0 + 2 * 365 * 86400
+    cr = A.sun_crossings(t0, t1, *REF)
+    sunsets = [x for x in cr if x["event"] == "sunset"]
+    assert abs(len(sunsets) - 730) <= 1
+    alt, _ = A.sun_position(np.array([x["t"] / 1000.0 for x in cr]), *REF)
+    assert np.max(np.abs(alt - np.array([x["elev_deg"] for x in cr]))) < 0.005
+    # summer at 61.2 N: the sun never reaches -12 deg around the June solstice -> no nautical events then
+    june = [x for x in cr if datetime.fromtimestamp(x["t"] / 1000, UTC).strftime("%m-%d") == "06-21"]
+    assert june and not any("nautical" in x["event"] for x in june)
+
+
+def test_series_sql_matches_python_and_ignores_twilight_markers(env):
+    store = env["app"].state.store
+    db = env["db"]
+    # twilight markers are stored as sky_photometry with the *threshold* as luma: not a measurement
+    for k in range(3):
+        _obs(db, "sky_photometry", T0 + timedelta(minutes=12, seconds=20 * k),
+             {"luma": 1.0, "region": "twilight_marker", "twilight_marker": {"event": "dusk"}}, "sky", 0.55)
+    _obs(db, "cloud_fraction", T0 + timedelta(minutes=13), {"fraction": "n/a"}, "sky", 0.5)        # non-numeric
+    _obs(db, "cloud_fraction", T0 + timedelta(minutes=14), {"method": "x"}, "sky", 0.5)            # missing
+    _obs(db, "scene_photometry", T0 + timedelta(minutes=15, seconds=5), {"luma": float("inf")}, "sky", 0.5)  # 'Infinity'
+    _obs(db, "scene_photometry", T0 + timedelta(minutes=15, seconds=9), {"luma": float("nan")}, "sky", 0.5)  # 'NaN'
+    q = {"since": "2026-09-21T17:00:00Z", "until": "2026-09-21T19:00:00Z"}
+    rng = np.random.default_rng(3)
+    for b in [60, 600, 437.5, float(rng.uniform(5, 3000))]:
+        sql = env["client"].get("/api/timeline", params={**q, "bucket_s": b}).json()
+        store.json1 = False                                                   # force the Python fallback
+        try:
+            py = env["client"].get("/api/timeline", params={**q, "bucket_s": b}).json()
+        finally:
+            store.json1 = True
+        for key in sql["series"]:
+            assert sql["series"][key]["points"] == py["series"][key]["points"], (key, b)
+            assert sql["series"][key]["n"] == py["series"][key]["n"], (key, b)
+    d = env["client"].get("/api/timeline", params={**q, "bucket_s": 600}).json()
+    first = d["series"]["sky_luma"]["points"][1]                              # minutes 10..19: luma 110..119
+    assert first[1] == 114.5 and first[2] == 10                               # markers (luma 1.0) not averaged in
+    scene = d["series"]["scene_luma"]["points"][1]
+    assert scene == [int((T0 + timedelta(minutes=15)).timestamp() * 1000), 80.0, 10]   # inf/NaN dropped, bucket kept
+
+
+def test_sse_resume_after_long_disconnect_is_capped(env):
+    c, db = env["client"], env["db"]
+    mo, me = env["app"].state.store.max_ids()
+    for k in range(40):
+        _obs(db, "audio_voice", T0 + timedelta(hours=7, seconds=k), {"snr_db": float(k)}, "audio_events", 0.5)
+    r = c.get("/api/stream", params={"max_replay": 10, "max_events": 10, "timeout": 5, "poll_s": 0.05},
+              headers={"Last-Event-ID": f"o{mo}.e{me}"})
+    evs = parse_sse(r.text)
+    gap = [e for e in evs if e["event"] == "gap"]
+    assert len(gap) == 1 and gap[0]["data"]["skipped_obs"] == 30 and gap[0]["data"]["from_id"] == mo
+    got = [e["data"]["id"] for e in evs if e["event"] == "observation"]
+    assert got == list(range(mo + 31, mo + 41))                               # exactly the 10 newest, in order
+    # a cursor from a replaced (smaller) DB would hide every new row: it is reset and announced
+    r = c.get("/api/stream", params={"timeout": 0.5, "poll_s": 0.05}, headers={"Last-Event-ID": "o999999.e999999"})
+    hello = [e for e in parse_sse(r.text) if e["event"] == "hello"][0]["data"]
+    assert hello["obs_cursor"] == mo + 40 and hello["gap"]["reason"].startswith("cursor ahead")
+
+
+def test_sse_calibration_message_only_for_real_calibrations(env):
+    c, db = env["client"], env["db"]
+
+    def later():
+        db.set_calibration("bridge_state:adsb", {"done": {"x": 1}})          # bridges persist state often
+        db.set_calibration(CURSOR_KEY, 12345)                                 # ntfy cursor
+        time.sleep(0.4)
+        db.set_calibration("audio_offset_s", -1.5)
+
+    _insert_later(db, 0.2, later)
+    r = c.get("/api/stream", params={"timeout": 1.4, "poll_s": 0.05})
+    cal = [e["data"] for e in parse_sse(r.text) if e["event"] == "calibration"]
+    assert len(cal) == 1 and cal[0]["audio_offset_s"] == -1.5 and cal[0]["latency_s"] == 32.5
+
+
+def test_kinds_counts_are_incremental_and_exact(env):
+    c, db = env["client"], env["db"]
+    k0 = {x["kind"]: x["n"] for x in c.get("/api/kinds").json()["kinds"]}
+    _obs(db, "audio_bells", T0 + timedelta(hours=9), {"snr_db": 3.0}, "audio_events", 0.4)
+    _obs(db, "sky_photometry", T0 - timedelta(days=2), {"luma": 5.0}, "sky", 0.4)       # older than all data
+    d = c.get("/api/kinds").json()
+    k1 = {x["kind"]: x for x in d["kinds"]}
+    assert k1["audio_bells"]["n"] == k0["audio_bells"] + 1 and k1["sky_photometry"]["n"] == k0["sky_photometry"] + 1
+    with sqlite3.connect(env["db_path"]) as con:
+        truth = dict(con.execute("SELECT kind, COUNT(*) FROM observations GROUP BY kind").fetchall())
+        tmin, tmax = con.execute("SELECT MIN(ts), MAX(ts) FROM observations").fetchone()
+    assert {k: v["n"] for k, v in k1.items() if v["n"]} == truth
+    assert env["app"].state.store.data_range() == (tmin, tmax)
+
+
+def test_search_is_literal_and_ack_all_scales(env):
+    c, db = env["client"], env["db"]
+    pct = _obs(db, "vlm_description", T0, {"text": "100% overcast"}, "vlm", 0.3)
+    und = _obs(db, "vlm_description", T0, {"text": "snake_case"}, "vlm", 0.3)
+    _obs(db, "vlm_description", T0, {"text": "snakeXcase"}, "vlm", 0.3)    # matched only if '_' were a wildcard
+    assert {x["id"] for x in c.get("/api/observations", params={"q": "%"}).json()["rows"]} == {pct}
+    assert {x["id"] for x in c.get("/api/observations", params={"q": "snake_c"}).json()["rows"]} == {und}
+    rows = [(iso(T0), "aircraft_layer", f"x{k}", "{}", "new", iso(T0)) for k in range(1500)]
+    db.con.executemany("INSERT INTO events(ts, kind, summary, value, status, created) VALUES (?,?,?,?,?,?)", rows)
+    db.con.commit()
+    r = c.post("/api/events/ack_all").json()
+    assert r["acked"] == 1500 + 2 and c.get("/api/events", params={"status": "new"}).json()["rows"] == []
+    assert c.get("/api/frames/near", params={"ts": ""}).status_code == 400
+
+
+def test_ntfy_bad_config_fails_soft_and_priorities_are_ntfy_integers(tmp_path):
+    posts = []
+    n = NtfyNotifier(_empty_db(tmp_path), topic="hw-ok", post=posts.append,
+                     priority={"whiteboard_text": "urgent", "astro": "high", "aircraft_layer": 9})
+    assert n.priority["whiteboard_text"] == 5 and n.priority["astro"] == 4 and n.priority["aircraft_layer"] == 5
+    with pytest.raises(ValueError):
+        NtfyNotifier(_empty_db(tmp_path), topic="has space/and slash")
+    # a broken push section must not keep the dashboard from starting
+    app = A.create_app(tmp_path / "z.sqlite", tmp_path, config={"dashboard": {"ntfy": {"topic": "bad topic!"}}})
+    assert app.state.notifier is None and TestClient(app).get("/api/health").json()["ok"] is True
+
+
+def _empty_db(tmp_path):
+    p = tmp_path / "ntfy.sqlite"
+    DB(p)
+    return p

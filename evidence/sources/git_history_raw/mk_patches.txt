@@ -1,0 +1,580 @@
+@@@@ e960f5f 2026-09-25 01:40:38 -0700 Legg til norsk forside, kilder og presiseringer
+
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+new file mode 100644
+index 0000000..8b6f3ed
+--- /dev/null
++++ b/CONTRIBUTING.md
+@@ -0,0 +1,15 @@
++# Bidra med nye observasjoner
++
++En god observasjon skal kunne etterprøves uten å kjenne hele samtalehistorikken.
++
++Opprett en sak med:
++
++1. **Hva du observerte:** beskriv det synlige eller målte før tolkningen.
++2. **Kilde:** lenke, filnavn og eventuelt bilde/klipp du har rett til å dele.
++3. **Tid:** dato, klokkeslett, tidssone og om tiden er strømtid eller virkelig tid. Norge brukte CEST (UTC+2) på datoene i rapporten.
++4. **Sted eller modell:** koordinatsystem, kandidat-ID og hvilke forutsetninger du brukte.
++5. **Konsekvens:** hva observasjonen støtter eller svekker, og hva den ikke avgjør.
++
++Ved beregninger: legg ved kode, datakilde og årgang, parameterverdier og råresultat. Skill modellert fri sikt fra faktisk fri sikt, og rettlinjet veiavstand fra dokumentert rute.
++
++Ved rettelser: oppgi rapport, side, sitat og foreslått rettelse. Ikke presenter gjentakelser av samme sekundærkilde som uavhengige bekreftelser.
+diff --git a/KILDER.md b/KILDER.md
+new file mode 100644
+index 0000000..bfcfa3e
+--- /dev/null
++++ b/KILDER.md
+@@ -0,0 +1,23 @@
++# Kilder og rettigheter
++
++Rapportene er satt sammen av Claude på grunnlag av brukerens arbeid og utveksling med Codex. Repositoriets forside og publiseringsnotater er redigert med Codex. AI-genererte tolkninger og beregninger kan inneholde feil.
++
++## Kilder omtalt i rapportene
++
++| Kilde | Rolle |
++|---|---|
++| [Horde – Hordejakten](https://horde.no/gjeldfri/hordejakten) | Arrangør, konkurranse og regler |
++| [YouTube-sendingen](https://www.youtube.com/watch?v=EQHgfmZicc8) | Bilder og tavleutsagn |
++| [default.no](https://default.no/) | Åpen logg, klipp, hint og modellarbeid; sekundærkilde for flere observasjoner |
++| [Kartverket / Høydedata](https://hoydedata.no/) | DTM og DOM |
++| [MET THREDDS](https://thredds.met.no/) | Væranalyse og radar |
++| [Dokumentasjon for MET Nordic](https://github.com/metno/NWPdocs/wiki/MET-Nordic-dataset) | Variabler, tidsangivelser og datagrunnlag |
++| [OpenStreetMap](https://www.openstreetmap.org/copyright) | Veier, vann og bygninger; © OpenStreetMap-bidragsytere, ODbL |
++| [adsb.lol](https://www.adsb.lol/) | Flyspor |
++| [Fellesskapskartet](https://github.com/MagnusPladsen/hordejakten-2026) | Delt hint- og kartarbeid |
++
++Rapportene omtaler også Artsdatabanken, Global Forest Watch og nyhetskilder. Enkelte opplysninger er gjengitt via default.no og er ikke originalkontrollert i dette publiseringsarbeidet. Dette er et datert arkiv, ikke en automatisk oppdatert gjengivelse av kildene.
++
++## Videre bruk
++
++Ingen samlet lisens er lagt på dette materialet. At repositoriet er offentlig betyr ikke at skjermbilder, kartgrunnlag og andre tredjepartsbidrag er fritt lisensiert. Opphavsrett og kildevilkår gjelder fortsatt for hvert element. Oppgi kilde og behold figurtekst, dato og forbehold ved henvisninger.
+diff --git a/PRESISERINGER.md b/PRESISERINGER.md
+new file mode 100644
+index 0000000..f78655f
+--- /dev/null
++++ b/PRESISERINGER.md
+@@ -0,0 +1,31 @@
++# Presiseringer og publiseringsstatus
++
++Oppdatert 25. september 2026. Dette notatet følger de to originale PDF-rapportene og endrer ikke originalfilene.
++
++## Hva er publisert?
++
++To PDF-er og 15 PNG-figurer fra den mottatte publiseringspakken, samt norske veiledningstekster. Fullrapporten er på 22 sider; kortversjonen er på 12 sider.
++
++Rapportens vedlegg B omtaler kandidat-CSV, kameramodell og kjøreskript i en tilhørende pakke. Disse filene var ikke med i denne opplastingspakken og finnes ikke i dette repositoriet. Publiseringen er derfor et rapport- og figurarkiv, ikke en komplett reproduksjonspakke.
++
++## Viktige presiseringer ved lesing
++
++- **«Består alle tester» betyr de valgte modellkravene**, ikke at stedet er bekreftet. Treffantall og robusthet er ikke sannsynligheter.
++- **Morgensol:** originalopptaket 21.09 kl. 07.45–08.00 er ikke kontrollert her. Rapportens formuleringer om at A1/A2 er «utelukket» må forstås som betinget av soltolkning, plassering og adkomstmodell. Tabellen viser at 12 A2-posisjoner består solkravet, men ingen består både sol og den valgte adkomsttesten.
++- **Temperatur:** dagverdiene som ble brukt i den tidligere værtesten gjelder det undersøkte dagvinduet. Betegnelsen «dagmaks» skal ikke automatisk leses som maksimum gjennom hele døgnet. Temperatur inne i kassen og uteluft er ikke samme observasjon.
++- **Uavhengighet:** terrengtester og syntetiske utsyn bruker samme høydedata. Skogtester og stammetreff bruker samme overflatemodell. MET-analyse og radar kan også være avhengige datakilder. Enighet mellom dem teller ikke automatisk som separate bekreftelser.
++- **Datapresisjon:** numeriske strålesteg på 1 cm gir ikke terrengdata med 1 cm fysisk nøyaktighet. Rasteroppløsning, målefeil og modellvalg består.
++- **Adkomst:** nærmeste kartlagte vei er ikke nødvendigvis brukt adkomst. En rett linje er ikke en rute. Manglende bro i OSM/DOM dokumenterer ikke alene at ingen overgang finnes.
++- **B3:** objektidentitet og diameter er ikke sikkert bestemt. Den gamle avstanden på 17–44 m er trukket tilbake. Historiske figurer kan vise gamle ringer eller utvalg.
++- **Nattlys og støtteapparat:** lysskiftet gir ingen dokumentert retning til vei eller hus. Personell, strøm og nett beviser ikke at en hytte eller fast strømtilførsel ligger nær.
++- **Appvaren med bever/olivenolje:** dette er en ubekreftet brukergjengivelse uten sikker produkttekst, ikke et etablert stedshint.
++
++## Interne avvik i rapportene
++
++Disse punktene er bevart i originalene og bør avklares ved en eventuell ny rapportversjon:
++
++1. Myklebysæterveien omtales enkelte steder som området med «flest treff». Samletabellen viser 5 treff etter alle trinn for E6 og 21 for E2. Førsteplassen kan være en skjønnsmessig prioritering, men begrunnes ikke med høyest totalt treffantall.
++2. Madsskardveien omtales med «bare to posisjoner», mens samletabellen har 3 for E3 etter alle trinn. Dette kan gjelde forskjellig geografisk avgrensning; det forklares ikke tydelig.
++3. Områdetallet 13 omfatter også et nytt P2-utsnitt i nærheten av tidligere punkt 7. Tabellen samler disse under «Punkt 7 / P2». Antall navngitte tabellrader og antall rasterutsnitt er derfor ikke det samme.
++
++Ingen av disse presiseringene etablerer en ny lokasjon. Den manglende kontrollen er fortsatt et dokumentert samsvar med det faktiske stedet.
+diff --git a/README.md b/README.md
+new file mode 100644
+index 0000000..d476531
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,63 @@
++# Hordejakten 2026
++
++### Rapporter, kart og åpen vurdering av sporene
++
++Et norskspråklig analysearkiv fra arbeidet med Hordejakten. Her er rapportene og figurene samlet, med en kort vei fra hovedfunn til metode og forbehold.
++
++**Status 25. september 2026: Ingen plassering er bekreftet.** Punktene nedenfor er rapportens foreslåtte kontrollrekkefølge. De er ikke dokumenterte funnsteder eller beregnede sannsynligheter.
++
++**[Les fullstendig rapport · 22 sider](rapport/Hordejakten_2026_fullstendig_rapport.pdf)** · **[Les kortversjonen · 12 sider](rapport/Hordejakten_2026_kortrapport.pdf)** · **[Se alle figurer](figurer/README.md)**
++
++![Oversikt over kandidatene og modellert temperatur](figurer/oversikt_temp.png)
++
++## Hva peker rapporten mot?
++
++Analysen undersøker områder rundt Evenstad i Østerdalen. Den kombinerer bilder fra sendingen, terreng- og overflatemodeller, kartlagt adkomst, solgeometri og værdata. Rapporten prioriterer disse kontrollpunktene:
++
++| Prioritet | Område | Omtrentlig kandidatpunkt (WGS84) | Begrunnelse i rapporten | Viktigste forbehold |
++|---|---|---|---|---|
++| 1 | Myklebysæterveien vest | 61.3995, 11.0316 | Samsvar med de valgte modellkravene og flere naboposisjoner | Avhenger av skog-, sol- og temperaturantakelsene |
++| 2 | Madsskardveien, traktorvei | 61.4443, 11.1234 | Adkomstretning og samsvar med modellkravene | Få lokale treff |
++| 3 | Sørlige Messelt | 61.4571, 10.8362 og 61.4545, 10.8406 | Adkomst og betinget støtte fra høydehintet | Værmodellen er kaldere enn den oppgitte temperaturen |
++| 4 | Madsskardveien øst | 61.4518, 11.1428 | Samsvar med modellkravene | Veien kommer fra sør; kartlagt bekk i nærheten |
++| 5 | Jernvinneveien | 61.4351, 11.1435 | Mange modelltreff og temperatursamsvar | Kort avstand til vei og bekk |
++
++Dette gjengir vurderingen i den leverte rapporten. Publiseringen innebærer ikke en ny, uavhengig gjennomkjøring av modellene. Birkebeinerveien, Gålaveien og punkt 7 er fortsatt relevante betingede alternativer; ingen hele områder kan avvises ut fra denne nettsiden alene.
++
++## Fire ting som må følge konklusjonen
++
++1. **Morgensola er ikke originalkontrollert.** Klokkeslettet 07.51 kommer fra default.no. Før soltesten brukes til å utelukke et sted, må den belyste flaten identifiseres: bakke, stamme og refleks gir forskjellige premisser.
++2. **Temperaturens målepunkt er ukjent.** Modellen gjelder uteluft. Temperatur inne i kassen kan ikke uten videre sammenlignes med den.
++3. **Skogmodellen er historisk og forenklet.** DOM-årgangen er ikke verifisert. DOM minus DTM er en overflatehøyde og beskriver ikke sikkert stammer, treslag eller fri sikt under kronene.
++4. **Søket dekker utvalgte områder.** Et godt modelltreff innenfor disse områdene bekrefter ikke at riktig region er valgt. Flere tester bruker samme data og er ikke uavhengige bevis.
++
++Se [presiseringer og publiseringsstatus](PRESISERINGER.md) for kjente begrensninger og formuleringer som må leses med varsomhet.
++
++## Bildet som skal sammenlignes
++
++![Registrerte kjennetegn i morgenbildet fra sendingen](figurer/fig_kjennetegn_1045.png)
++
++Figuren samler synlige kjennetegn. Den tidligere avstanden på 17–44 meter til det antatte stubbeobjektet ved B3 er trukket tilbake. Et faktisk samsvar mellom stedet og flere identifiserbare detaljer i bildet mangler fortsatt.
++
++## Slik finner du fram
++
++| Innhold | Hva du finner |
++|---|---|
++| [Fullstendig rapport](rapport/Hordejakten_2026_fullstendig_rapport.pdf) | Hint, fly, vær, sol, kamerageometri, terreng, skog, adkomst, rettelser og feltkart |
++| [Kortversjon](rapport/Hordejakten_2026_kortrapport.pdf) | Hovedfunn, sammenligning og kontrollrekkefølge |
++| [Figurgalleri](figurer/README.md) | Alle 15 figurer med forklaring og status |
++| [Presiseringer](PRESISERINGER.md) | Usikkerhet, interne avvik og hva som faktisk er publisert |
++| [Kilder og rettigheter](KILDER.md) | Opphav, datakilder og videre bruk |
++| [Bidra med observasjoner](CONTRIBUTING.md) | Hvordan dokumentere et nytt funn slik at det kan kontrolleres |
++
++Rapporter og figurer er bevart uendret fra opplastingspakken. Repositoriet inneholder ikke rådata og beregningsskript; henvisninger til slike pakker i PDF-en gjelder separate arbeidsarkiver.
++
++## Nye observasjoner
++
++Bruk [Issues](https://github.com/mkekeoooo/hordejakten-2026/issues) til dokumenterte rettelser eller nye observasjoner. Ta med kilde, dato, klokkeslett, tidssone og hva observasjonen faktisk viser. Oppgi tydelig hva som er tolkning.
++
++Kartlinjer er ikke verifiserte gangruter, og veipunkter er ikke bekreftede parkeringsplasser. Følg arrangørens regler og respekter terreng, bommer og mannskap.
++
++---
++
++Uavhengig analysearbeid med AI-assistanse fra Claude og Codex, samlet av repositoriets eier. Ingen tilknytning til Horde. Takk til default.no og bidragsyterne til de åpne datakildene.
+@@@@ b296fa4 2026-09-25 10:43:37 +0200 Opprett rapportmappe med leseveiledning
+
+diff --git a/rapport/README.md b/rapport/README.md
+new file mode 100644
+index 0000000..c80e9a3
+--- /dev/null
++++ b/rapport/README.md
+@@ -0,0 +1,6 @@
++# Rapporter
++
++- [Fullstendig rapport – 22 sider](Hordejakten_2026_fullstendig_rapport.pdf)
++- [Kortversjon – 12 sider](Hordejakten_2026_kortrapport.pdf)
++
++Begge er datert 25. september 2026 og publisert uendret fra den mottatte pakken. Les dem sammen med [presiseringene](../PRESISERINGER.md). Ingen plassering er bekreftet.
+@@@@ 5f7eda8 2026-09-25 10:46:47 +0200 Opprett figurmappe
+
+diff --git a/figurer/README.md b/figurer/README.md
+new file mode 100644
+index 0000000..75fa91b
+--- /dev/null
++++ b/figurer/README.md
+@@ -0,0 +1,3 @@
++# Figurer og kart
++
++Alle originalfigurer fra rapportpakken. Se [forsiden](../README.md) og [presiseringene](../PRESISERINGER.md).
+@@@@ 30edfa8 2026-09-25 01:48:46 -0700 Publiser 15 figurer og norsk figurgalleri
+
+diff --git a/figurer/README.md b/figurer/README.md
+index 75fa91b..adcd6eb 100644
+--- a/figurer/README.md
++++ b/figurer/README.md
+@@ -1,3 +1,40 @@
+ # Figurer og kart
+ 
+-Alle originalfigurer fra rapportpakken. Se [forsiden](../README.md) og [presiseringene](../PRESISERINGER.md).
++Alle 15 originalfigurer fra publiseringspakken. Klikk på et bilde for full oppløsning. Illustrasjonene er modellresultater eller registrerte bildeobservasjoner; de dokumenterer ikke i seg selv plasseringen.
++
++## Oversikt og feltkart
++
++![Kandidater og modellert temperatur](oversikt_temp.png)
++
++| Kart | Innhold |
++|---|---|
++| [Myklebysæterveien vest](kart_1_E6.png) | Rapportens kontrollområde 1 |
++| [Madsskardveien, traktorvei](kart_2_E3.png) | Kontrollområde 2 |
++| [Sørlige og nordlige Messelt](feltsone_Messelt_S1_S2_N1_N2.png) | S1, S2, N1 og N2 |
++| [Madsskardveien øst](kart_4_E1.png) | Kontrollområde 4 |
++| [Jernvinneveien](kart_5_E2.png) | Kontrollområde 5 |
++| [Adkomst ved A2](bro_sjekk_A2.png) | Modell og kart over elv/ravine; ingen dokumentert trygg rute |
++
++![Myklebysæterveien vest](kart_1_E6.png)
++
++Veipunkter er ikke bekreftede parkeringsplasser. Prikkede forbindelser kan være luftlinjer, ikke stier.
++
++## Bildeobservasjoner
++
++| Figur | Innhold |
++|---|---|
++| [Kjennetegn kl. 10.45](fig_kjennetegn_1045.png) | Detaljer til sammenligning med et mulig sted |
++| [Bakkepunkter i bildet](fig_bildemaling.png) | Bildekoordinater og vinkler |
++| [Sammenligning av det antatte stubbeobjektet](fig_stubbe_sammenligning.png) | Grunnlag for å trekke tilbake den antatte B3-avstanden |
++| [Stammeplassering](fig_stammeplassering.png) | Utforskende sammenligning med kronemodellen |
++| [Lyshendelsen om natten](fig_lyshendelse.png) | Lysendring uten dokumentert geografisk retning |
++
++## Modeller og historiske scenarioer
++
++| Figur | Status |
++|---|---|
++| [Sol og temperatur](sol_og_temp.png) | Betingede modelltester; morgensol og temperaturreferanse er usikre |
++| [Syntetisk utsyn](syntetisk_utsyn_kronebase40.png) | Illustrasjon med antatt kronebase; ikke en uavhengig bekreftelse |
++| [Flyanalyse, 83 ruter](flykart_83ruter.png) | Historisk scenario avgrenset av høydehint og flyantakelser |
++
++Gamle figurmarkeringer skal ikke gjeninnføre den tilbaketrukne B3-avstanden på 17–44 m. Se [presiseringene](../PRESISERINGER.md).
+@@@@ 94a45c1 2026-09-25 02:02:05 -0700 Ansett Inspektør Pus og innfør katteskikken
+
+diff --git a/README.md b/README.md
+index d476531..ace3cf3 100644
+--- a/README.md
++++ b/README.md
+@@ -1,63 +1,79 @@
+-# Hordejakten 2026
+-
+-### Rapporter, kart og åpen vurdering av sporene
+-
+-Et norskspråklig analysearkiv fra arbeidet med Hordejakten. Her er rapportene og figurene samlet, med en kort vei fra hovedfunn til metode og forbehold.
+-
+-**Status 25. september 2026: Ingen plassering er bekreftet.** Punktene nedenfor er rapportens foreslåtte kontrollrekkefølge. De er ikke dokumenterte funnsteder eller beregnede sannsynligheter.
+-
+-**[Les fullstendig rapport · 22 sider](rapport/Hordejakten_2026_fullstendig_rapport.pdf)** · **[Les kortversjonen · 12 sider](rapport/Hordejakten_2026_kortrapport.pdf)** · **[Se alle figurer](figurer/README.md)**
+-
+-![Oversikt over kandidatene og modellert temperatur](figurer/oversikt_temp.png)
+-
+-## Hva peker rapporten mot?
+-
+-Analysen undersøker områder rundt Evenstad i Østerdalen. Den kombinerer bilder fra sendingen, terreng- og overflatemodeller, kartlagt adkomst, solgeometri og værdata. Rapporten prioriterer disse kontrollpunktene:
+-
+-| Prioritet | Område | Omtrentlig kandidatpunkt (WGS84) | Begrunnelse i rapporten | Viktigste forbehold |
+-|---|---|---|---|---|
+-| 1 | Myklebysæterveien vest | 61.3995, 11.0316 | Samsvar med de valgte modellkravene og flere naboposisjoner | Avhenger av skog-, sol- og temperaturantakelsene |
+-| 2 | Madsskardveien, traktorvei | 61.4443, 11.1234 | Adkomstretning og samsvar med modellkravene | Få lokale treff |
+-| 3 | Sørlige Messelt | 61.4571, 10.8362 og 61.4545, 10.8406 | Adkomst og betinget støtte fra høydehintet | Værmodellen er kaldere enn den oppgitte temperaturen |
+-| 4 | Madsskardveien øst | 61.4518, 11.1428 | Samsvar med modellkravene | Veien kommer fra sør; kartlagt bekk i nærheten |
+-| 5 | Jernvinneveien | 61.4351, 11.1435 | Mange modelltreff og temperatursamsvar | Kort avstand til vei og bekk |
+-
+-Dette gjengir vurderingen i den leverte rapporten. Publiseringen innebærer ikke en ny, uavhengig gjennomkjøring av modellene. Birkebeinerveien, Gålaveien og punkt 7 er fortsatt relevante betingede alternativer; ingen hele områder kan avvises ut fra denne nettsiden alene.
+-
+-## Fire ting som må følge konklusjonen
+-
+-1. **Morgensola er ikke originalkontrollert.** Klokkeslettet 07.51 kommer fra default.no. Før soltesten brukes til å utelukke et sted, må den belyste flaten identifiseres: bakke, stamme og refleks gir forskjellige premisser.
+-2. **Temperaturens målepunkt er ukjent.** Modellen gjelder uteluft. Temperatur inne i kassen kan ikke uten videre sammenlignes med den.
+-3. **Skogmodellen er historisk og forenklet.** DOM-årgangen er ikke verifisert. DOM minus DTM er en overflatehøyde og beskriver ikke sikkert stammer, treslag eller fri sikt under kronene.
+-4. **Søket dekker utvalgte områder.** Et godt modelltreff innenfor disse områdene bekrefter ikke at riktig region er valgt. Flere tester bruker samme data og er ikke uavhengige bevis.
+-
+-Se [presiseringer og publiseringsstatus](PRESISERINGER.md) for kjente begrensninger og formuleringer som må leses med varsomhet.
+-
+-## Bildet som skal sammenlignes
+-
+-![Registrerte kjennetegn i morgenbildet fra sendingen](figurer/fig_kjennetegn_1045.png)
+-
+-Figuren samler synlige kjennetegn. Den tidligere avstanden på 17–44 meter til det antatte stubbeobjektet ved B3 er trukket tilbake. Et faktisk samsvar mellom stedet og flere identifiserbare detaljer i bildet mangler fortsatt.
+-
+-## Slik finner du fram
+-
+-| Innhold | Hva du finner |
+-|---|---|
+-| [Fullstendig rapport](rapport/Hordejakten_2026_fullstendig_rapport.pdf) | Hint, fly, vær, sol, kamerageometri, terreng, skog, adkomst, rettelser og feltkart |
+-| [Kortversjon](rapport/Hordejakten_2026_kortrapport.pdf) | Hovedfunn, sammenligning og kontrollrekkefølge |
+-| [Figurgalleri](figurer/README.md) | Alle 15 figurer med forklaring og status |
+-| [Presiseringer](PRESISERINGER.md) | Usikkerhet, interne avvik og hva som faktisk er publisert |
+-| [Kilder og rettigheter](KILDER.md) | Opphav, datakilder og videre bruk |
+-| [Bidra med observasjoner](CONTRIBUTING.md) | Hvordan dokumentere et nytt funn slik at det kan kontrolleres |
+-
+-Rapporter og figurer er bevart uendret fra opplastingspakken. Repositoriet inneholder ikke rådata og beregningsskript; henvisninger til slike pakker i PDF-en gjelder separate arbeidsarkiver.
+-
+-## Nye observasjoner
+-
+-Bruk [Issues](https://github.com/mkekeoooo/hordejakten-2026/issues) til dokumenterte rettelser eller nye observasjoner. Ta med kilde, dato, klokkeslett, tidssone og hva observasjonen faktisk viser. Oppgi tydelig hva som er tolkning.
+-
+-Kartlinjer er ikke verifiserte gangruter, og veipunkter er ikke bekreftede parkeringsplasser. Følg arrangørens regler og respekter terreng, bommer og mannskap.
+-
+----
+-
+-Uavhengig analysearbeid med AI-assistanse fra Claude og Codex, samlet av repositoriets eier. Ingen tilknytning til Horde. Takk til default.no og bidragsyterne til de åpne datakildene.
++# Hordejakten 2026
++
++### Rapporter, kart og åpen vurdering av sporene
++
++Et norskspråklig analysearkiv fra arbeidet med Hordejakten. Her er rapportene og figurene samlet, med en kort vei fra hovedfunn til metode og forbehold.
++
++**Status 25. september 2026: Ingen plassering er bekreftet.** Punktene nedenfor er rapportens foreslåtte kontrollrekkefølge. De er ikke dokumenterte funnsteder eller beregnede sannsynligheter.
++
++**[Les fullstendig rapport · 22 sider](rapport/Hordejakten_2026_fullstendig_rapport.pdf)** · **[Les kortversjonen · 12 sider](rapport/Hordejakten_2026_kortrapport.pdf)** · **[Se alle figurer](figurer/README.md)**
++
++![Oversikt over kandidatene og modellert temperatur](figurer/oversikt_temp.png)
++
++## Hva peker rapporten mot?
++
++Analysen undersøker områder rundt Evenstad i Østerdalen. Den kombinerer bilder fra sendingen, terreng- og overflatemodeller, kartlagt adkomst, solgeometri og værdata. Rapporten prioriterer disse kontrollpunktene:
++
++| Prioritet | Område | Omtrentlig kandidatpunkt (WGS84) | Begrunnelse i rapporten | Viktigste forbehold |
++|---|---|---|---|---|
++| 1 | Myklebysæterveien vest | 61.3995, 11.0316 | Samsvar med de valgte modellkravene og flere naboposisjoner | Avhenger av skog-, sol- og temperaturantakelsene |
++| 2 | Madsskardveien, traktorvei | 61.4443, 11.1234 | Adkomstretning og samsvar med modellkravene | Få lokale treff |
++| 3 | Sørlige Messelt | 61.4571, 10.8362 og 61.4545, 10.8406 | Adkomst og betinget støtte fra høydehintet | Værmodellen er kaldere enn den oppgitte temperaturen |
++| 4 | Madsskardveien øst | 61.4518, 11.1428 | Samsvar med modellkravene | Veien kommer fra sør; kartlagt bekk i nærheten |
++| 5 | Jernvinneveien | 61.4351, 11.1435 | Mange modelltreff og temperatursamsvar | Kort avstand til vei og bekk |
++
++Dette gjengir vurderingen i den leverte rapporten. Publiseringen innebærer ikke en ny, uavhengig gjennomkjøring av modellene. Birkebeinerveien, Gålaveien og punkt 7 er fortsatt relevante betingede alternativer; ingen hele områder kan avvises ut fra denne nettsiden alene.
++
++## Fire ting som må følge konklusjonen
++
++1. **Morgensola er ikke originalkontrollert.** Klokkeslettet 07.51 kommer fra default.no. Før soltesten brukes til å utelukke et sted, må den belyste flaten identifiseres: bakke, stamme og refleks gir forskjellige premisser.
++2. **Temperaturens målepunkt er ukjent.** Modellen gjelder uteluft. Temperatur inne i kassen kan ikke uten videre sammenlignes med den.
++3. **Skogmodellen er historisk og forenklet.** DOM-årgangen er ikke verifisert. DOM minus DTM er en overflatehøyde og beskriver ikke sikkert stammer, treslag eller fri sikt under kronene.
++4. **Søket dekker utvalgte områder.** Et godt modelltreff innenfor disse områdene bekrefter ikke at riktig region er valgt. Flere tester bruker samme data og er ikke uavhengige bevis.
++
++Se [presiseringer og publiseringsstatus](PRESISERINGER.md) for kjente begrensninger og formuleringer som må leses med varsomhet.
++
++## Bildet som skal sammenlignes
++
++![Registrerte kjennetegn i morgenbildet fra sendingen](figurer/fig_kjennetegn_1045.png)
++
++Figuren samler synlige kjennetegn. Den tidligere avstanden på 17–44 meter til det antatte stubbeobjektet ved B3 er trukket tilbake. Et faktisk samsvar mellom stedet og flere identifiserbare detaljer i bildet mangler fortsatt.
++
++## Slik finner du fram
++
++| Innhold | Hva du finner |
++|---|---|
++| [Fullstendig rapport](rapport/Hordejakten_2026_fullstendig_rapport.pdf) | Hint, fly, vær, sol, kamerageometri, terreng, skog, adkomst, rettelser og feltkart |
++| [Kortversjon](rapport/Hordejakten_2026_kortrapport.pdf) | Hovedfunn, sammenligning og kontrollrekkefølge |
++| [Figurgalleri](figurer/README.md) | Alle 15 figurer med forklaring og status |
++| [Presiseringer](PRESISERINGER.md) | Usikkerhet, interne avvik og hva som faktisk er publisert |
++| [Kilder og rettigheter](KILDER.md) | Opphav, datakilder og videre bruk |
++| [Bidra med observasjoner](CONTRIBUTING.md) | Hvordan dokumentere et nytt funn slik at det kan kontrolleres |
++
++Rapporter og figurer er bevart uendret fra opplastingspakken. Repositoriet inneholder ikke rådata og beregningsskript; henvisninger til slike pakker i PDF-en gjelder separate arbeidsarkiver.
++
++## Nye observasjoner
++
++Bruk [Issues](https://github.com/mkekeoooo/hordejakten-2026/issues) til dokumenterte rettelser eller nye observasjoner. Ta med kilde, dato, klokkeslett, tidssone og hva observasjonen faktisk viser. Oppgi tydelig hva som er tolkning.
++
++Kartlinjer er ikke verifiserte gangruter, og veipunkter er ikke bekreftede parkeringsplasser. Følg arrangørens regler og respekter terreng, bommer og mannskap.
++
++## 🐈 Forker du? Ta med katten.
++
++![Inspektør Pus – avdeling for ubekreftede spor](etterforskningskatten.svg)
++
++Dette er **Inspektør Pus**, vår uoffisielle etterforsker. Han har undersøkt alle pappeskene og nekter å kommentere funnene.
++
++**Repoets eneste katteskikk:** Lager du en fork, la Pus bli med i README-en. Du kan endre teoriene, flytte kartnålene og være uenig med oss. Katten ber bare om å få beholde jobben.
++
++*En frivillig tradisjon, ikke et lisenskrav. Pus godkjenner snacks, ikke konklusjoner.*
++
++Vil du ta ham med til et annet prosjekt? Kopier SVG-filen og denne linjen til README-en:
++
++```markdown
++![Inspektør Pus – avdeling for ubekreftede spor](etterforskningskatten.svg)
++```
++
++---
++
++Uavhengig analysearbeid med AI-assistanse fra Claude og Codex, samlet av repositoriets eier. Ingen tilknytning til Horde. Takk til default.no og bidragsyterne til de åpne datakildene.
+@@@@ 77fe435 2026-09-25 03:31:03 -0700 Oppdater forsiden med avklaringer fra revisjonen
+
+diff --git a/PRESISERINGER.md b/PRESISERINGER.md
+index f78655f..d679686 100644
+--- a/PRESISERINGER.md
++++ b/PRESISERINGER.md
+@@ -1,31 +1,40 @@
+-# Presiseringer og publiseringsstatus
+-
++# Presiseringer og publiseringsstatus
++
+ Oppdatert 25. september 2026. Dette notatet følger de to originale PDF-rapportene og endrer ikke originalfilene.
+ 
+-## Hva er publisert?
+-
+-To PDF-er og 15 PNG-figurer fra den mottatte publiseringspakken, samt norske veiledningstekster. Fullrapporten er på 22 sider; kortversjonen er på 12 sider.
+-
+-Rapportens vedlegg B omtaler kandidat-CSV, kameramodell og kjøreskript i en tilhørende pakke. Disse filene var ikke med i denne opplastingspakken og finnes ikke i dette repositoriet. Publiseringen er derfor et rapport- og figurarkiv, ikke en komplett reproduksjonspakke.
+-
+-## Viktige presiseringer ved lesing
+-
+-- **«Består alle tester» betyr de valgte modellkravene**, ikke at stedet er bekreftet. Treffantall og robusthet er ikke sannsynligheter.
+-- **Morgensol:** originalopptaket 21.09 kl. 07.45–08.00 er ikke kontrollert her. Rapportens formuleringer om at A1/A2 er «utelukket» må forstås som betinget av soltolkning, plassering og adkomstmodell. Tabellen viser at 12 A2-posisjoner består solkravet, men ingen består både sol og den valgte adkomsttesten.
+-- **Temperatur:** dagverdiene som ble brukt i den tidligere værtesten gjelder det undersøkte dagvinduet. Betegnelsen «dagmaks» skal ikke automatisk leses som maksimum gjennom hele døgnet. Temperatur inne i kassen og uteluft er ikke samme observasjon.
+-- **Uavhengighet:** terrengtester og syntetiske utsyn bruker samme høydedata. Skogtester og stammetreff bruker samme overflatemodell. MET-analyse og radar kan også være avhengige datakilder. Enighet mellom dem teller ikke automatisk som separate bekreftelser.
+-- **Datapresisjon:** numeriske strålesteg på 1 cm gir ikke terrengdata med 1 cm fysisk nøyaktighet. Rasteroppløsning, målefeil og modellvalg består.
+-- **Adkomst:** nærmeste kartlagte vei er ikke nødvendigvis brukt adkomst. En rett linje er ikke en rute. Manglende bro i OSM/DOM dokumenterer ikke alene at ingen overgang finnes.
+-- **B3:** objektidentitet og diameter er ikke sikkert bestemt. Den gamle avstanden på 17–44 m er trukket tilbake. Historiske figurer kan vise gamle ringer eller utvalg.
+-- **Nattlys og støtteapparat:** lysskiftet gir ingen dokumentert retning til vei eller hus. Personell, strøm og nett beviser ikke at en hytte eller fast strømtilførsel ligger nær.
+-- **Appvaren med bever/olivenolje:** dette er en ubekreftet brukergjengivelse uten sikker produkttekst, ikke et etablert stedshint.
+-
+-## Interne avvik i rapportene
+-
+-Disse punktene er bevart i originalene og bør avklares ved en eventuell ny rapportversjon:
+-
+-1. Myklebysæterveien omtales enkelte steder som området med «flest treff». Samletabellen viser 5 treff etter alle trinn for E6 og 21 for E2. Førsteplassen kan være en skjønnsmessig prioritering, men begrunnes ikke med høyest totalt treffantall.
+-2. Madsskardveien omtales med «bare to posisjoner», mens samletabellen har 3 for E3 etter alle trinn. Dette kan gjelde forskjellig geografisk avgrensning; det forklares ikke tydelig.
+-3. Områdetallet 13 omfatter også et nytt P2-utsnitt i nærheten av tidligere punkt 7. Tabellen samler disse under «Punkt 7 / P2». Antall navngitte tabellrader og antall rasterutsnitt er derfor ikke det samme.
+-
+-Ingen av disse presiseringene etablerer en ny lokasjon. Den manglende kontrollen er fortsatt et dokumentert samsvar med det faktiske stedet.
++## Avklaringer i den løpende revisjonen
++
++- Den historiske kontrollrekkefølgen er **ikke en vedtatt, gjeldende rangering**. Ingen region er bekreftet. Se [samlesak #1](https://github.com/mkekeoooo/hordejakten-2026/issues/1).
++- Temperatur er et betinget scenario, ikke et hardt utelukkelseskriterium. Det er heller ikke dokumentert at alle tavleverdier er for høye, eller hvilken korreksjon som eventuelt gjelder. Se [#3](https://github.com/mkekeoooo/hordejakten-2026/issues/3).
++- Codex har kjørt Claudes `fly_2109.mjs` og gjenskapt resultatene fra de publiserte råsporene. Det bekrefter beregningen under dens premisser, ikke at gesten gjaldt dette flyet eller at forsinkelsen er målt for akkurat hendelsen. Se [#5](https://github.com/mkekeoooo/hordejakten-2026/issues/5).
++- Codex har kjørt `horisont_api.mjs` mot Kartverket og gjenskapt 8,4° / 7,3° / 6,6° ved Jernvinneveien 5a/5b/5c mot 98,8°, fra 1,5 m. Hindringene ligger henholdsvis 800, 1050 og 1300 m unna. Dette er terrengtall; endelig kobling til den belyste flaten i morgenbildene er fortsatt under vurdering i [#2](https://github.com/mkekeoooo/hordejakten-2026/issues/2).
++- Samme koordinat i flere analyser kan stamme fra samme nettside eller modell. Det gir bare selvstendig støtte når observasjonene og utledningen faktisk er uavhengige. Et populært punkt er ikke dokumentert undersøkt uten feltdokumentasjon.
++- Kandidat 1s veipeiling er omtrent 94°. Et ubetinget samsvarsmerke mot et tolket 130°-hint er ikke begrunnet. Se [#4](https://github.com/mkekeoooo/hordejakten-2026/issues/4).
++
++## Hva er publisert?
++
++To PDF-er og 15 PNG-figurer fra den mottatte publiseringspakken, samt norske veiledningstekster. Fullrapporten er på 22 sider; kortversjonen er på 12 sider.
++
++Rapportens vedlegg B omtaler kandidat-CSV, kameramodell og kjøreskript i en tilhørende pakke. Den komplette pakken var ikke med i opplastingen. Nye revisjonsdata og skript er senere publisert på [en separat bevisgren](https://github.com/mkekeoooo/hordejakten-2026/tree/bevis/claude-2026-09-25/bevis/claude-2026-09-25), men utgjør ikke en komplett reproduksjonspakke for rapporten.
++
++## Viktige presiseringer ved lesing
++
++- **«Består alle tester» betyr de valgte modellkravene**, ikke at stedet er bekreftet. Treffantall og robusthet er ikke sannsynligheter.
++- **Morgensol:** originalopptaket 21.09 kl. 07.45–08.00 er ikke kontrollert her. Rapportens formuleringer om at A1/A2 er «utelukket» må forstås som betinget av soltolkning, plassering og adkomstmodell. Tabellen viser at 12 A2-posisjoner består solkravet, men ingen består både sol og den valgte adkomsttesten.
++- **Temperatur:** dagverdiene som ble brukt i den tidligere værtesten gjelder det undersøkte dagvinduet. Betegnelsen «dagmaks» skal ikke automatisk leses som maksimum gjennom hele døgnet. Temperatur inne i kassen og uteluft er ikke samme observasjon.
++- **Uavhengighet:** terrengtester og syntetiske utsyn bruker samme høydedata. Skogtester og stammetreff bruker samme overflatemodell. MET-analyse og radar kan også være avhengige datakilder. Enighet mellom dem teller ikke automatisk som separate bekreftelser.
++- **Datapresisjon:** numeriske strålesteg på 1 cm gir ikke terrengdata med 1 cm fysisk nøyaktighet. Rasteroppløsning, målefeil og modellvalg består.
++- **Adkomst:** nærmeste kartlagte vei er ikke nødvendigvis brukt adkomst. En rett linje er ikke en rute. Manglende bro i OSM/DOM dokumenterer ikke alene at ingen overgang finnes.
++- **B3:** objektidentitet og diameter er ikke sikkert bestemt. Den gamle avstanden på 17–44 m er trukket tilbake. Historiske figurer kan vise gamle ringer eller utvalg.
++- **Nattlys og støtteapparat:** lysskiftet gir ingen dokumentert retning til vei eller hus. Personell, strøm og nett beviser ikke at en hytte eller fast strømtilførsel ligger nær.
++- **Appvaren med bever/olivenolje:** dette er en ubekreftet brukergjengivelse uten sikker produkttekst, ikke et etablert stedshint.
++
++## Interne avvik i rapportene
++
++Disse punktene er bevart i originalene og bør avklares ved en eventuell ny rapportversjon:
++
++1. Myklebysæterveien omtales enkelte steder som området med «flest treff». Samletabellen viser 5 treff etter alle trinn for E6 og 21 for E2. Førsteplassen kan være en skjønnsmessig prioritering, men begrunnes ikke med høyest totalt treffantall.
++2. Madsskardveien omtales med «bare to posisjoner», mens samletabellen har 3 for E3 etter alle trinn. Dette kan gjelde forskjellig geografisk avgrensning; det forklares ikke tydelig.
++3. Områdetallet 13 omfatter også et nytt P2-utsnitt i nærheten av tidligere punkt 7. Tabellen samler disse under «Punkt 7 / P2». Antall navngitte tabellrader og antall rasterutsnitt er derfor ikke det samme.
++
++Ingen av disse presiseringene etablerer en ny lokasjon. Den manglende kontrollen er fortsatt et dokumentert samsvar med det faktiske stedet.
+diff --git a/README.md b/README.md
+index ace3cf3..baa096b 100644
+--- a/README.md
++++ b/README.md
+@@ -4,17 +4,29 @@
+ 
+ Et norskspråklig analysearkiv fra arbeidet med Hordejakten. Her er rapportene og figurene samlet, med en kort vei fra hovedfunn til metode og forbehold.
+ 
+-**Status 25. september 2026: Ingen plassering er bekreftet.** Punktene nedenfor er rapportens foreslåtte kontrollrekkefølge. De er ikke dokumenterte funnsteder eller beregnede sannsynligheter.
++**Status 25. september 2026: Ingen plassering eller region er bekreftet. Den tidligere nummererte kandidatlisten er under revisjon.** Den er bevart som historikk nedenfor, ikke som en gjeldende rangering.
++
++## Siste avklaringer
++
++Claude og Codex fører den løpende gjennomgangen i [samlesak #1](https://github.com/mkekeoooo/hordejakten-2026/issues/1). Viktige avklaringer publiseres også her; uavklarte forslag blir stående i sakene.
++
++- **Regionen må holdes åpen.** Flyhendelsen 21.09 har usikker objektidentitet og tidsforsinkelse. Claudes nye flytabell er gjenskapt av Codex, men den bekrefter ikke Evenstad som region. [Bakgrunn og data · #5](https://github.com/mkekeoooo/hordejakten-2026/issues/5)
++- **Temperatur skal ikke være et hardt filter.** Måleforholdene er ukjente. Messelt og andre steder skal ikke forkastes alene fordi uteluftsmodellen er kaldere enn tavleverdien. Ingen bestemt temperaturkorreksjon er dokumentert. [Avklaring · #3](https://github.com/mkekeoooo/hordejakten-2026/issues/3)
++- **Morgensoltesten er under kontroll.** Codex har gjenskapt terrenghorisontene på 8,4° / 7,3° / 6,6° ved de tre Jernvinneveien-markørene. Om dette utelukker et sted, avhenger også av den faktisk belyste flatens plassering og høyde. Bakke-, stamme- og kronelys må skilles. Endelig stedsvurdering er fortsatt åpen. [Beregninger og uenighet · #2](https://github.com/mkekeoooo/hordejakten-2026/issues/2)
++- **Gjentatte koordinater er ikke nye bekreftelser.** Punktet 61°26′55,3″N 10°58′39,0″E samsvarer innen én meter med default.no sitt site finder-toppunkt ved A1. Samme kilde kan ligge bak flere forslag. Et sted er heller ikke dokumentert gjennomsøkt uten feltdokumentasjon. [Avklart i samlesaken](https://github.com/mkekeoooo/hordejakten-2026/issues/1#issuecomment-5830735101)
++- **Veiretning og tavletekst må oppgis med premissene.** Kandidat 1s vei ligger omtrent mot 94°, og får ikke ubetinget samsvar med en tolket 130°-retning. [Veiretning · #4](https://github.com/mkekeoooo/hordejakten-2026/issues/4) · [Hele tavlesitater · #6](https://github.com/mkekeoooo/hordejakten-2026/issues/6)
++
++**Hva mangler?** Et etterprøvbart samsvar mellom flere særpregede detaljer i bildene og ett faktisk sted. Modelltreff og enighet mellom AI-analyser er ikke nok.
+ 
+ **[Les fullstendig rapport · 22 sider](rapport/Hordejakten_2026_fullstendig_rapport.pdf)** · **[Les kortversjonen · 12 sider](rapport/Hordejakten_2026_kortrapport.pdf)** · **[Se alle figurer](figurer/README.md)**
+ 
+ ![Oversikt over kandidatene og modellert temperatur](figurer/oversikt_temp.png)
+ 
+-## Hva peker rapporten mot?
++## Historisk kandidatliste fra rapporten
+ 
+-Analysen undersøker områder rundt Evenstad i Østerdalen. Den kombinerer bilder fra sendingen, terreng- og overflatemodeller, kartlagt adkomst, solgeometri og værdata. Rapporten prioriterer disse kontrollpunktene:
++Den opprinnelige analysen undersøkte utvalgte områder rundt Evenstad i Østerdalen og kombinerte bilder, terreng, skog, adkomst, sol og vær. Tabellen viser hva rapporten foreslo da den ble skrevet. Begrunnelsene er historiske og må leses sammen med rettelsene over.
+ 
+-| Prioritet | Område | Omtrentlig kandidatpunkt (WGS84) | Begrunnelse i rapporten | Viktigste forbehold |
++| Rapport-ID | Område | Omtrentlig kandidatpunkt (WGS84) | Opprinnelig begrunnelse | Viktigste forbehold |
+ |---|---|---|---|---|
+ | 1 | Myklebysæterveien vest | 61.3995, 11.0316 | Samsvar med de valgte modellkravene og flere naboposisjoner | Avhenger av skog-, sol- og temperaturantakelsene |
+ | 2 | Madsskardveien, traktorvei | 61.4443, 11.1234 | Adkomstretning og samsvar med modellkravene | Få lokale treff |
+@@ -22,11 +34,11 @@ Analysen undersøker områder rundt Evenstad i Østerdalen. Den kombinerer bilde
+ | 4 | Madsskardveien øst | 61.4518, 11.1428 | Samsvar med modellkravene | Veien kommer fra sør; kartlagt bekk i nærheten |
+ | 5 | Jernvinneveien | 61.4351, 11.1435 | Mange modelltreff og temperatursamsvar | Kort avstand til vei og bekk |
+ 
+-Dette gjengir vurderingen i den leverte rapporten. Publiseringen innebærer ikke en ny, uavhengig gjennomkjøring av modellene. Birkebeinerveien, Gålaveien og punkt 7 er fortsatt relevante betingede alternativer; ingen hele områder kan avvises ut fra denne nettsiden alene.
++Ingen ny nummerert rangering er vedtatt. Birkebeinerveien, Gålaveien, Messelt og punkt 7 inngår fortsatt i den dokumenterte undersøkelsen med ulike åpne spørsmål; listen avgrenser ikke hvor kassen kan være. Den opprinnelige samlemodellen er ikke gjenskapt i sin helhet i den løpende revisjonen.
+ 
+ ## Fire ting som må følge konklusjonen
+ 
+-1. **Morgensola er ikke originalkontrollert.** Klokkeslettet 07.51 kommer fra default.no. Før soltesten brukes til å utelukke et sted, må den belyste flaten identifiseres: bakke, stamme og refleks gir forskjellige premisser.
++1. **Morgensolens geometri er ikke ferdig avklart.** Rapportens klokkeslett 07.51 kom fra default.no. Claude har senere analysert originalklipp og foreslått krone- og stammelys tidligere enn dette; koblingen mellom disse flatene og terrengmodellen gjennomgås i #2. Bakke, krone, stamme og refleks gir forskjellige premisser.
+ 2. **Temperaturens målepunkt er ukjent.** Modellen gjelder uteluft. Temperatur inne i kassen kan ikke uten videre sammenlignes med den.
+ 3. **Skogmodellen er historisk og forenklet.** DOM-årgangen er ikke verifisert. DOM minus DTM er en overflatehøyde og beskriver ikke sikkert stammer, treslag eller fri sikt under kronene.
+ 4. **Søket dekker utvalgte områder.** Et godt modelltreff innenfor disse områdene bekrefter ikke at riktig region er valgt. Flere tester bruker samme data og er ikke uavhengige bevis.
+@@ -50,7 +62,7 @@ Figuren samler synlige kjennetegn. Den tidligere avstanden på 17–44 meter til
+ | [Kilder og rettigheter](KILDER.md) | Opphav, datakilder og videre bruk |
+ | [Bidra med observasjoner](CONTRIBUTING.md) | Hvordan dokumentere et nytt funn slik at det kan kontrolleres |
+ 
+-Rapporter og figurer er bevart uendret fra opplastingspakken. Repositoriet inneholder ikke rådata og beregningsskript; henvisninger til slike pakker i PDF-en gjelder separate arbeidsarkiver.
++Rapporter og figurer er bevart uendret fra opplastingspakken. PDF-enes henvisninger til komplette arbeidsarkiver gjelder separate pakker. Nye råspor og skript for revisjonen ligger foreløpig på [Claudes separate bevisgren](https://github.com/mkekeoooo/hordejakten-2026/tree/bevis/claude-2026-09-25/bevis/claude-2026-09-25); dette er ikke en komplett reproduksjon av den opprinnelige rapporten.
+ 
+ ## Nye observasjoner
+ 
+@@@@ 25c3768 2026-09-25 03:47:27 -0700 Dokumenter A1-kontrollen og lenk til samlet bevispakke
+
+diff --git a/README.md b/README.md
+index baa096b..471c676 100644
+--- a/README.md
++++ b/README.md
+@@ -15,8 +15,11 @@ Claude og Codex fører den løpende gjennomgangen i [samlesak #1](https://github
+ - **Morgensoltesten er under kontroll.** Codex har gjenskapt terrenghorisontene på 8,4° / 7,3° / 6,6° ved de tre Jernvinneveien-markørene. Om dette utelukker et sted, avhenger også av den faktisk belyste flatens plassering og høyde. Bakke-, stamme- og kronelys må skilles. Endelig stedsvurdering er fortsatt åpen. [Beregninger og uenighet · #2](https://github.com/mkekeoooo/hordejakten-2026/issues/2)
+ - **Gjentatte koordinater er ikke nye bekreftelser.** Punktet 61°26′55,3″N 10°58′39,0″E samsvarer innen én meter med default.no sitt site finder-toppunkt ved A1. Samme kilde kan ligge bak flere forslag. Et sted er heller ikke dokumentert gjennomsøkt uten feltdokumentasjon. [Avklart i samlesaken](https://github.com/mkekeoooo/hordejakten-2026/issues/1#issuecomment-5830735101)
+ - **Veiretning og tavletekst må oppgis med premissene.** Kandidat 1s vei ligger omtrent mot 94°, og får ikke ubetinget samsvar med en tolket 130°-retning. [Veiretning · #4](https://github.com/mkekeoooo/hordejakten-2026/issues/4) · [Hele tavlesitater · #6](https://github.com/mkekeoooo/hordejakten-2026/issues/6)
++- **Det eksakte A1-punktet har svak skogstøtte i rastergrunnlaget.** Både Claudes kontroll og Codex' nye test viser lave kroneverdier ved 61.4487, 10.9775. Hos Codex består ingen av 25 prøveposisjoner alle skogkravene, verken med kamera i markøren eller fem meter forskjøvet, og verken med cellebasert eller radial prøvetaking. Årgangen for de valgte DOM-pikslene er fortsatt uavklart; resultatet utelukker ikke hele A1-området. [Målinger og avgrensning · #8](https://github.com/mkekeoooo/hordejakten-2026/issues/8)
+ 
+ **Hva mangler?** Et etterprøvbart samsvar mellom flere særpregede detaljer i bildene og ett faktisk sted. Modelltreff og enighet mellom AI-analyser er ikke nok.
++
++[Ny kontrollpakke · én ZIP](https://github.com/user-attachments/files/32648877/Hordejakten_kontroll_25sep.zip) inneholder Codex' skript, resultater, rasterutsnitt, flyspor og den eldre modell v6. Pakken dokumenterer også at de undersøkte hintvideobildene passer med zoom/utsnitt og ikke gir en påvist stereobaseline for treavstander. [Les forskningssvaret](https://github.com/mkekeoooo/hordejakten-2026/issues/1#issuecomment-5831094440).
+ 
+ **[Les fullstendig rapport · 22 sider](rapport/Hordejakten_2026_fullstendig_rapport.pdf)** · **[Les kortversjonen · 12 sider](rapport/Hordejakten_2026_kortrapport.pdf)** · **[Se alle figurer](figurer/README.md)**
+ 
+@@@@ d1fbac0 2026-09-25 04:43:20 -0700 Oppdater regionale avklaringer og dokumenter nytt olivin-spor
+
+diff --git a/PRESISERINGER.md b/PRESISERINGER.md
+index d679686..b2c7fe9 100644
+--- a/PRESISERINGER.md
++++ b/PRESISERINGER.md
+@@ -27,7 +27,7 @@ Rapportens vedlegg B omtaler kandidat-CSV, kameramodell og kjøreskript i en til
+ - **Adkomst:** nærmeste kartlagte vei er ikke nødvendigvis brukt adkomst. En rett linje er ikke en rute. Manglende bro i OSM/DOM dokumenterer ikke alene at ingen overgang finnes.
+ - **B3:** objektidentitet og diameter er ikke sikkert bestemt. Den gamle avstanden på 17–44 m er trukket tilbake. Historiske figurer kan vise gamle ringer eller utvalg.
+ - **Nattlys og støtteapparat:** lysskiftet gir ingen dokumentert retning til vei eller hus. Personell, strøm og nett beviser ikke at en hytte eller fast strømtilførsel ligger nær.
+-- **Appvaren med bever/olivenolje:** dette er en ubekreftet brukergjengivelse uten sikker produkttekst, ikke et etablert stedshint.
++- **Appvaren med olivenolje:** Codex har nå lest [to tredjepartsformidlede produktskjermbilder](https://praktiskinfo.no/hordejakten-2026/). Bildet viser en grevling, navnet er «Olivenoljestativ», prisen 100 000 poeng og fraktteksten «Nesten Helt Hjem». Varen er ikke kontrollert direkte i appen, og koblingen til jaktens plassering er fortsatt ubekreftet. Den tidligere omtalen av en bever korrigeres.
+ 
+ ## Interne avvik i rapportene
+ 
+diff --git a/README.md b/README.md
+index 471c676..88cad39 100644
+--- a/README.md
++++ b/README.md
+@@ -11,6 +11,7 @@ Et norskspråklig analysearkiv fra arbeidet med Hordejakten. Her er rapportene o
+ Claude og Codex fører den løpende gjennomgangen i [samlesak #1](https://github.com/mkekeoooo/hordejakten-2026/issues/1). Viktige avklaringer publiseres også her; uavklarte forslag blir stående i sakene.
+ 
+ - **Regionen må holdes åpen.** Flyhendelsen 21.09 har usikker objektidentitet og tidsforsinkelse. Claudes nye flytabell er gjenskapt av Codex, men den bekrefter ikke Evenstad som region. [Bakgrunn og data · #5](https://github.com/mkekeoooo/hordejakten-2026/issues/5)
++- **Pekevinkel og værutelukkelser er rettet.** En arm nesten loddrett i bildet er ikke en måling av flyets høydevinkel. Claude har trukket tilbake den slutningen, og vi er enige om at gesten ikke alene velger eller utelukker region. De tidligere værutelukkelsene av vest og sør var modellbaserte og ikke verifisert mot observasjoner; de brukes ikke som harde grenser. [Felles avklaring · #9](https://github.com/mkekeoooo/hordejakten-2026/issues/9#issuecomment-5831319502)
+ - **Temperatur skal ikke være et hardt filter.** Måleforholdene er ukjente. Messelt og andre steder skal ikke forkastes alene fordi uteluftsmodellen er kaldere enn tavleverdien. Ingen bestemt temperaturkorreksjon er dokumentert. [Avklaring · #3](https://github.com/mkekeoooo/hordejakten-2026/issues/3)
+ - **Morgensoltesten er under kontroll.** Codex har gjenskapt terrenghorisontene på 8,4° / 7,3° / 6,6° ved de tre Jernvinneveien-markørene. Om dette utelukker et sted, avhenger også av den faktisk belyste flatens plassering og høyde. Bakke-, stamme- og kronelys må skilles. Endelig stedsvurdering er fortsatt åpen. [Beregninger og uenighet · #2](https://github.com/mkekeoooo/hordejakten-2026/issues/2)
+ - **Gjentatte koordinater er ikke nye bekreftelser.** Punktet 61°26′55,3″N 10°58′39,0″E samsvarer innen én meter med default.no sitt site finder-toppunkt ved A1. Samme kilde kan ligge bak flere forslag. Et sted er heller ikke dokumentert gjennomsøkt uten feltdokumentasjon. [Avklart i samlesaken](https://github.com/mkekeoooo/hordejakten-2026/issues/1#issuecomment-5830735101)
+@@ -19,6 +20,8 @@ Claude og Codex fører den løpende gjennomgangen i [samlesak #1](https://github
+ 
+ **Hva mangler?** Et etterprøvbart samsvar mellom flere særpregede detaljer i bildene og ett faktisk sted. Modelltreff og enighet mellom AI-analyser er ikke nok.
+ 
++**Nytt, uprøvd spor: olivenolje → olivin.** Brukerens ordspillforslag gir Åheim/Almklovdalen som et nytt undersøkelsesområde, med dokumentert olivindrift og olivinfuruskog. Koblingen fra appvaren til mineralet er ikke bekreftet, og området er ikke rangert foran de andre. Den nye landsdekkende sol- og værkontrollen ga heller ingen sikker region. [Les funn, kilder og forbehold](https://github.com/mkekeoooo/hordejakten-2026/issues/1#issuecomment-5831785445) · [Samlet dokumentasjon · én ZIP](https://github.com/user-attachments/files/32650613/Hordejakten_landsok_sol_appspor_25sep.zip).
++
+ [Ny kontrollpakke · én ZIP](https://github.com/user-attachments/files/32648877/Hordejakten_kontroll_25sep.zip) inneholder Codex' skript, resultater, rasterutsnitt, flyspor og den eldre modell v6. Pakken dokumenterer også at de undersøkte hintvideobildene passer med zoom/utsnitt og ikke gir en påvist stereobaseline for treavstander. [Les forskningssvaret](https://github.com/mkekeoooo/hordejakten-2026/issues/1#issuecomment-5831094440).
+ 
+ **[Les fullstendig rapport · 22 sider](rapport/Hordejakten_2026_fullstendig_rapport.pdf)** · **[Les kortversjonen · 12 sider](rapport/Hordejakten_2026_kortrapport.pdf)** · **[Se alle figurer](figurer/README.md)**
+@@ -41,7 +44,7 @@ Ingen ny nummerert rangering er vedtatt. Birkebeinerveien, Gålaveien, Messelt o
+ 
+ ## Fire ting som må følge konklusjonen
+ 
+-1. **Morgensolens geometri er ikke ferdig avklart.** Rapportens klokkeslett 07.51 kom fra default.no. Claude har senere analysert originalklipp og foreslått krone- og stammelys tidligere enn dette; koblingen mellom disse flatene og terrengmodellen gjennomgås i #2. Bakke, krone, stamme og refleks gir forskjellige premisser.
++1. **Morgensolens geometri er ikke ferdig avklart.** Rapportens klokkeslett 07.51 kom fra default.no. Claude har senere analysert default.no sine minuttklipp og foreslått krone- og stammelys tidligere enn dette; koblingen mellom disse flatene og terrengmodellen gjennomgås i #2. Bakke, krone, stamme og refleks gir forskjellige premisser.
+ 2. **Temperaturens målepunkt er ukjent.** Modellen gjelder uteluft. Temperatur inne i kassen kan ikke uten videre sammenlignes med den.
+ 3. **Skogmodellen er historisk og forenklet.** DOM-årgangen er ikke verifisert. DOM minus DTM er en overflatehøyde og beskriver ikke sikkert stammer, treslag eller fri sikt under kronene.
+ 4. **Søket dekker utvalgte områder.** Et godt modelltreff innenfor disse områdene bekrefter ikke at riktig region er valgt. Flere tester bruker samme data og er ikke uavhengige bevis.

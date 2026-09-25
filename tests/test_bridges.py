@@ -275,22 +275,24 @@ CANDS = (np.array([X_TRUE[0], 61.2, 61.6, 61.0, 60.8, 61.45]), np.array([X_TRUE[
 
 def test_audio_event_layer_geometry():
     tracks, events = synthetic_audio()
-    tr = tracks[0]                                # heading 0, passes 2 km E of X at T0
+    # tracks[0]: heading 0, passes 2 km E of X at T0
     ev = events[0]
     clats, clons = A.coarse_axes((60.6, 62.2, 10.0, 12.2))
     CL, CO = np.meshgrid(clats, clons, indexing="ij")
     Lv, Lw = A.latency_prior()
-    cpas = [c for c in (A.audio_cpa(t, CL, CO, ev["t_obs"] - 300, ev["t_obs"] + 30) for t in tracks) if c is not None]
-    P = A.audio_prob_from_cpas(cpas, ev["t_obs"], Lv, Lw)
+    w0, w1 = A.audio_track_window(ev["t_obs"], A.AUDIO_L_GRID)
+    cpas = [c for c in (A.audio_cpa(t, CL, CO, w0, w1) for t in tracks) if c is not None]
+    P = A.audio_prob_from_cpas(cpas, ev["t_obs"], Lv, Lw)       # likelihood ratio, 1 = no information
     at = lambda la, lo: P[np.argmin(np.abs(clats - la)), np.argmin(np.abs(clons - lo))]
-    # one peak under a flat 15-60 s latency prior matches ~half of the prior mass (sigma_t ~ 14 s)
-    assert at(*X_TRUE) > 0.4
-    assert at(X_TRUE[0], X_TRUE[1] + 1.2) < 0.15         # ~65 km east: inaudible -> floor 0.1
-    assert at(X_TRUE[0] + 0.6, X_TRUE[1]) < 0.15         # under the track 67 km north: CPA ~4.8 min earlier
+    # one peak under a flat 15-60 s latency prior: the right timing for ~half the prior mass
+    assert at(*X_TRUE) > 3.0
+    assert at(X_TRUE[0], X_TRUE[1] + 1.2) == pytest.approx(1.0, abs=0.02)   # ~65 km east: inaudible, no information
+    assert at(X_TRUE[0] + 0.25, X_TRUE[1]) < 0.7         # under the track 28 km north: audible, CPA ~2 min too early
+    assert at(X_TRUE[0] + 0.6, X_TRUE[1]) < 1.2          # 67 km north: CPA 4.8 min earlier, outside the window
     # a calibrated latency sharpens the same event
     Lc, Wc = A.latency_prior(calib={"well_determined": True, "latency_s": 25.0, "latency_sigma_s": 3.0})
     P2 = A.audio_prob_from_cpas(cpas, ev["t_obs"], Lc, Wc)
-    assert P2[np.argmin(np.abs(clats - X_TRUE[0])), np.argmin(np.abs(clons - X_TRUE[1]))] > 0.7
+    assert P2[np.argmin(np.abs(clats - X_TRUE[0])), np.argmin(np.abs(clons - X_TRUE[1]))] > 1.5 * at(*X_TRUE)
 
 
 def test_latency_calibration_recovers_synthetic_latency():
@@ -511,7 +513,7 @@ def test_weather_bridge_day_layer(tmp_path):
                                            analyzer="rain", confidence=0.8))
     ctx.db.add_observation(Observation("temperature", from_unix(H - 3600), {"temp_c": 9.0, "where": "outside"}, analyzer="wb"))
     wb = M.WeatherBridge({"providers": [M.ArrayProvider(fields)], "met_grid": SG, "layers_dir": str(tmp_path / "layers"),
-                          "lookback_days": 1e5})
+                          "lookback_days": 1e5, "async": False})
     obs = wb.on_tick(ctx)
     f = tmp_path / "layers" / "weather_rain_visual_20260924.npz"
     assert f.exists()
@@ -870,3 +872,310 @@ def test_defaultno_poller_cycle(tmp_path):
     p2 = DN.DefaultNoPoller({"cmd": [sys.executable, "-c", "pass"], "snapshots_dir": str(snaps), "async": False, "every_min": 0})
     p2.on_tick(ctx)
     assert ctx.db.con.execute("SELECT kind FROM events ORDER BY id DESC LIMIT 1").fetchone()[0] == "defaultno_fetch_failed"
+
+
+# =========================================================================== adversarial review tests
+# Each test below failed on (or pins a fix of) a defect found in review.
+def azel_to_px(az, el, f=1068.0, w=1280, h=720, heading=219.6):
+    """Inverse of adsb.pixel_to_azel for a level camera (pitch = roll = 0)."""
+    a, e, hd = np.radians(az), np.radians(el), np.radians(heading)
+    d = np.array([np.cos(e) * np.sin(a), np.cos(e) * np.cos(a), np.sin(e)])
+    fwd, right, up = np.array([np.sin(hd), np.cos(hd), 0.0]), np.array([np.cos(hd), -np.sin(hd), 0.0]), np.array([0, 0, 1.0])
+    return (w - 1) / 2 + f * (d @ right) / (d @ fwd), (h - 1) / 2 - f * (d @ up) / (d @ fwd)
+
+
+def add_frame(db, idx, capture_unix, latency):
+    from hordewatch.types import Frame
+    fr = Frame(idx, from_unix(capture_unix), from_unix(capture_unix - latency), np.zeros((2, 2, 3), np.uint8))
+    db.add_frame(fr)
+    return fr
+
+
+def test_gesture_summary_row_joins_its_onset_event(tmp_path):
+    """The gesture analyzer's 'summary' row has ts = onset (real) but ts_capture / frame of the END of the
+    episode. Using ts_capture split one 90 s pointing into two events (two layers, two independence
+    groups: the same gesture counted twice, the second at the moment the arm went down)."""
+    ctx = ctx_for(tmp_path)
+    tc, lat = to_unix("2026-09-21T21:29:38+02:00"), 30.0
+    fa, fb = add_frame(ctx.db, 0, tc, lat), add_frame(ctx.db, 18, tc + 90, lat)
+    ctx.db.add_observation(Observation("gesture_point_up", from_unix(tc - lat), {
+        "arm_angle_deg_from_vertical": 13, "side": "left", "phase": "onset", "sampling_gap_s": 5.0},
+        analyzer="gesture", confidence=0.65, frame_id=fa.id, ts_capture=fa.capture_ts))
+    ctx.db.add_observation(Observation("gesture_point_up", from_unix(tc - lat), {
+        "arm_angle_deg_from_vertical": 20, "side": "left", "phase": "summary", "duration_s": 85.0},
+        analyzer="gesture", confidence=0.3, frame_id=fb.id, ts_capture=fb.capture_ts))
+    b = A.AircraftBridge({**NO_NET, "providers": ["fixture"], "layers_dir": str(tmp_path / "layers"),
+                          "cache_dir": str(tmp_path / "cache")})
+    evs = b.collect_events(ctx.db, ctx.clock, now=tc + 3600)
+    assert len(evs) == 1 and evs[0]["t_first"] == pytest.approx(tc) and len(evs[0]["obs"]) == 2
+    b.on_tick(ctx)
+    (f,) = list((tmp_path / "layers").glob("aircraft_*.npz"))
+    ll, meta = read_layer(f)
+    # one layer, the builtin group, the summary's 85 s dwell used (capped at max_dwell_s = 60 s)
+    assert meta["independence_group"] == "aircraft_2109_2129_point" and "60 s" in meta["description"]
+    assert ll_at(ll, *UNDER_NOZ9EG) > ll_at(ll, *BERGEN) + 2.0
+
+
+def test_aircraft_light_track_times_use_the_analyzer_latency(tmp_path):
+    """aircraft_light: ts = first track point (real), ts_capture = the frame that CLOSED the track.
+    Track point times must be shifted by the analyzer's latency only; adding (ts_capture - ts) also
+    added the track duration + closing gap (60 s here = 14 km of flight) and moved the layer's peak
+    ~18 km away from the true place."""
+    real = A.parse_trace(TRACE)
+    t0, lat = to_unix("2026-09-21T21:29:00+02:00"), 30.0
+    la, lo, _, _ = real.at(t0)
+    X = tuple(float(v) for v in destination(la[0], lo[0], 40.0, 30.0))      # 30 km NE of NOZ9EG: it is in view, el ~15 deg
+    from hordejakt.geo import bearing, elevation_angle
+    trk = []
+    for dt in (0.0, 20.0, 40.0):
+        a, o, h, _ = real.at(t0 + dt)
+        az = float(bearing(X[0], X[1], a[0], o[0]))
+        el = float(elevation_angle(haversine(X[0], X[1], a[0], o[0]), h[0] - A.OBSERVER_M))
+        u, v = azel_to_px(az, el)
+        assert 0 <= u < 1280 and 0 <= v < 720
+        trk.append([from_unix(t0 + dt).isoformat(), u, v])
+    ctx = ctx_for(tmp_path)
+    fr = add_frame(ctx.db, 7, t0 + 60 + lat, lat)                            # track closed 20 s after its last point
+    ctx.db.add_observation(Observation("aircraft_light", from_unix(t0), {"track": trk, "w": 1280, "h": 720},
+                                       analyzer="night", confidence=0.6, frame_id=fr.id, ts_capture=fr.capture_ts))
+    b = A.AircraftBridge({**NO_NET, "providers": ["fixture"], "layers_dir": str(tmp_path / "layers"),
+                          "cache_dir": str(tmp_path / "cache"), "latency_range_s": [28.0, 32.0], "latency_margin_s": 1.0})
+    b.on_tick(ctx)
+    (f,) = list((tmp_path / "layers").glob("aircraft_*.npz"))
+    ll, _ = read_layer(f)
+    i, j = np.unravel_index(np.nanargmax(ll), ll.shape)
+    assert haversine(GRID.lats[i], GRID.lons[j], *X) < 4.0
+    assert ll_at(ll, *X) > -0.5 and ll_at(ll, *X) > ll_at(ll, X[0] - 0.15, X[1]) + 1.0
+
+
+def test_audio_peak_does_not_favour_busy_airspace():
+    """One jet-noise peak, true place X (one aircraft passes at the right time) vs a place B 60 km away
+    with ~2 audible low aircraft per minute (an approach path). The old unnormalised score
+    1 - prod(1 - p_a) saturated at B and ranked it ABOVE X; the conditional timing likelihood makes a
+    place where aircraft pass all the time uninformative and keeps quiet cells neutral (not at a floor)."""
+    tracks, events = synthetic_audio(latency=25.0)
+    ev, B = events[0], (60.9, 10.3)
+    rng = np.random.default_rng(1)
+    busy = [straight(f"b{k:05x}", *B, rng.uniform(0, 360), 2500.0, 250,
+                     ev["t_obs"] - 425 + 30 * k + rng.uniform(-10, 10), rng.uniform(0, 3)) for k in range(28)]
+    clats, clons = A.coarse_axes((60.4, 62.0, 9.6, 12.0))
+    CL, CO = np.meshgrid(clats, clons, indexing="ij")
+    w0, w1 = ev["t_obs"] - 600.0, ev["t_obs"] + 250.0                  # covers audio_track_window(t_obs, 0..120 s)
+    cpas = [c for c in (A.audio_cpa(t, CL, CO, w0, w1) for t in [tracks[0]] + busy) if c is not None]
+    P = A.audio_prob_from_cpas(cpas, ev["t_obs"], *A.latency_prior())
+    at = lambda la, lo: float(P[np.argmin(np.abs(clats - la)), np.argmin(np.abs(clons - lo))])
+    assert np.log(at(*X_TRUE) / at(*B)) > 0.8
+    assert at(*B) < 1.3
+    assert at(62.0, 12.0) == pytest.approx(1.0, abs=1e-6)          # nothing audible: exactly no information
+
+
+def test_latency_calibration_without_the_true_location_as_candidate(tmp_path):
+    """The original test put X_TRUE itself among the candidates. Live candidates are ~5 km posterior
+    block centroids (common.posterior_candidates); none is at the true place. The fit must still
+    recover the latency (and a long one, 48 s, not just the prior-typical 25 s)."""
+    from hordewatch.bridges.common import posterior_candidates
+    L, O = GRID.mesh()
+    post = np.exp(-0.5 * (haversine(L, O, X_TRUE[0] + 0.03, X_TRUE[1] - 0.05) / 8.0) ** 2)
+    np.savez_compressed(tmp_path / "posterior.npz", post=(post / post.sum()).astype(np.float32), lat_min=GRID.lat_min,
+                        lon_min=GRID.lon_min, dlat=GRID.dlat, dlon=GRID.dlon)
+    la, lo, w = posterior_candidates(tmp_path / "posterior.npz", tmp_path / "missing.json")
+    assert haversine(la, lo, *X_TRUE).min() > 1.5                    # the truth is not a candidate
+    for true_lat in (25.0, 48.0):
+        tracks, events = synthetic_audio(latency=true_lat, seed=7)
+        tf = lambda ev: [t for t in tracks if t.t[0] <= ev["t_obs"] + 300 and t.t[-1] >= ev["t_obs"] - 600]
+        res = A.calibrate_latency(events, la, lo, w, tf)
+        assert abs(res["latency_s"] - true_lat) <= 5.0 and res["well_determined"], res["latency_s"]
+        assert "clutter" not in res["matched"]
+
+
+def test_opensky_refuses_windows_it_cannot_serve(tmp_path):
+    """/states/all ignores `time` for anonymous users and serves <= 1 h of history to registered
+    users. Anonymous 'recent' windows used to be requested and the (present-time) answer flagged
+    the window COMPLETE, stopping the provider chain with no aircraft in the window."""
+    import time as _t
+    calls = []
+
+    def handler(url, params=None, **kw):
+        calls.append(params)
+        return FakeResp({"time": int(_t.time()), "states": [["4791ac", "NOZ9EG", "N", _t.time(), _t.time(), 10.9, 61.3,
+                                                             7600.0, False, 250.0, 182.0, 0.0, None, 7800.0, "1", False, 0]]})
+    now = _t.time()
+    anon = A.OpenSkyProvider(tmp_path / "a")
+    anon._s = FakeSession(handler)
+    ts = anon.tracks(now - 600, now - 540)
+    assert ts.tracks == [] and not ts.complete and calls == []
+    old = A.OpenSkyProvider(tmp_path / "b", username="u", password="p")
+    old._s = FakeSession(handler)
+    assert not old.tracks(now - 7200, now - 7140).complete and calls == []
+    ignoring = A.OpenSkyProvider(tmp_path / "c", username="u", password="p")
+    ignoring._s = FakeSession(handler)                                  # answers for "now", not for the asked time
+    ts = ignoring.tracks(now - 1800, now - 1740)
+    assert not ts.complete and len(calls) == 1
+
+    def echo(url, params=None, **kw):
+        t = params["time"]
+        return FakeResp({"time": t, "states": [["4791ac", "NOZ9EG", "N", t, t, 10.9 + 1e-4 * (t - now), 61.3, 7600.0,
+                                                False, 250.0, 182.0, 0.0, None, 7800.0, "1", False, 0]]})
+    good = A.OpenSkyProvider(tmp_path / "d", username="u", password="p")
+    good._s = FakeSession(echo)
+    ts = good.tracks(now - 1800, now - 1740)
+    assert ts.complete and [t.hex for t in ts.tracks] == ["4791ac"]
+    trunc = A.OpenSkyProvider(tmp_path / "e", username="u", password="p", max_calls=2)
+    trunc._s = FakeSession(echo)
+    assert not trunc.tracks(now - 1800, now - 1740).complete           # 5 calls needed, 2 allowed
+
+
+def test_tilt_sign_uncertainty_and_dwell_direction():
+    """The gesture analyzer's 'side' is the tilt direction only on the arm-only path; elsewhere it is
+    the body side of the raised arm. A wrong sign must not wipe out the right place."""
+    b = A.AircraftBridge({})
+    assert b._tilt({"arm_angle_deg_from_vertical": 13, "side": "left"}) == (-13, 0.75)
+    assert b._tilt({"arm_angle_deg_from_vertical": 13, "side": "right", "arm_only": True}) == (13, 0.9)
+    assert b._tilt({"tilt_deg_image": -13}) == (-13, 0.95)
+    real = A.parse_trace(TRACE)
+    clats, clons = A.coarse_axes((61.0, 61.8, 10.4, 11.6))
+    CL, CO = np.meshgrid(clats, clons, indexing="ij")
+    tc, D, W = to_unix("2026-09-21T21:29:38+02:00"), np.array([15.0]), np.array([1.0])
+    i, j = np.argmin(np.abs(clats - 61.40)), np.argmin(np.abs(clons - 11.04))    # Myklebysaeter: true tilt -13
+    base = A.sighting_prob(CL, CO, [real], tc, D, W)[i, j]
+    wrong_sure = A.sighting_prob(CL, CO, [real], tc, D, W, tilt_obs=13.0, tilt_weight=0.9)[i, j] / base
+    wrong_unsure = A.sighting_prob(CL, CO, [real], tc, D, W, tilt_obs=13.0, tilt_weight=0.9, tilt_sign_p=0.75)[i, j] / base
+    right_unsure = A.sighting_prob(CL, CO, [real], tc, D, W, tilt_obs=-13.0, tilt_weight=0.9, tilt_sign_p=0.75)[i, j] / base
+    assert wrong_sure < 0.45 and wrong_unsure > wrong_sure + 0.1 and right_unsure > 0.8
+    # dwell: she follows the aircraft AFTER the onset frame -> delays reach below the latency
+    Lv, Lw = A.latency_prior()
+    D2, _ = A.with_reaction(Lv - 30.0, Lw, 8.0 + 30.0)
+    assert D2.min() < Lv.min() - 25.0 and D2.max() <= Lv.max() + 8.0 + 2.5
+
+
+def test_low_confidence_gestures_share_one_daily_group(tmp_path):
+    """A noisy detector (arm-only fallback, conf <= 0.35) must not add one independent
+    'some aircraft was overhead' layer per false trigger: those events share a daily group and get
+    r <= 0.5; confident detections keep their own group with r >= 0.5."""
+    ctx = ctx_for(tmp_path)
+    for iso_t, conf in (("2026-09-21T21:31:40+02:00", 0.3), ("2026-09-21T21:33:40+02:00", 0.25),
+                        ("2026-09-21T21:35:40+02:00", 0.7)):
+        tc = to_unix(iso_t)
+        ctx.db.add_observation(Observation("gesture_point_up", from_unix(tc - 30), {"arm_angle_deg_from_vertical": 5},
+                                           analyzer="gesture", confidence=conf, ts_capture=from_unix(tc)))
+    b = A.AircraftBridge({**NO_NET, "providers": ["fixture"], "layers_dir": str(tmp_path / "layers"),
+                          "cache_dir": str(tmp_path / "cache")})
+    b.on_tick(ctx)
+    metas = sorted((read_layer(p)[1] for p in (tmp_path / "layers").glob("aircraft_*.npz")), key=lambda m: m["event_id"])
+    assert len(metas) == 3
+    assert [m["independence_group"] for m in metas[:2]] == ["hw_aircraft_lowconf_20260921"] * 2
+    assert all(0.2 <= m["reliability"] <= 0.5 for m in metas[:2])
+    assert metas[2]["independence_group"] == "hw_aircraft_20260921T193540Z" and metas[2]["reliability"] >= 0.5
+
+
+def test_continuous_detector_does_not_hold_one_event_open(tmp_path):
+    """Detections every 40 s (< cluster_s) for 30 min chained into ONE event that never settled
+    (and would have used only its loudest peak); clusters are now capped at max_cluster_s."""
+    ctx = ctx_for(tmp_path)
+    for k in range(45):
+        t = T0 + 40.0 * k
+        ctx.db.add_observation(Observation("audio_aircraft", from_unix(t - 30), {"snr_db": 6}, analyzer="audio",
+                                           ts_capture=from_unix(t)))
+    b = A.AircraftBridge(NO_NET)
+    evs = b.collect_events(ctx.db, ctx.clock, now=T0 + 7200)
+    assert len(evs) >= 6 and all(e["t_last"] - e["t_first"] <= 300.0 for e in evs)
+    assert sum(len(e["obs"]) for e in evs) == 45
+
+
+def test_weather_lookback_keeps_days_whole(tmp_path):
+    """With lookback_days=1 the old cut-off (now - 24 h) fell inside yesterday: its row count changed,
+    so the layer was rebuilt from the day's tail only (silently weaker evidence)."""
+    ctx = ctx_for(tmp_path)
+    for hh in ("01:10", "06:10", "12:10", "20:10"):
+        ctx.db.add_observation(Observation("rain_visual", parse_iso(f"2026-09-24T{hh}:00+02:00"), {"present": True},
+                                           analyzer="rain", confidence=0.6))
+    wb = M.WeatherBridge({"providers": [], "lookback_days": 1})
+    for now_iso in ("2026-09-24T23:00:00+02:00", "2026-09-25T10:00:00+02:00", "2026-09-25T23:59:00+02:00"):
+        g = wb.rows_by_day(ctx.db, now=to_unix(now_iso))
+        assert len(g[("rain_visual", "20260924")]) == 4, now_iso
+    assert wb.rows_by_day(ctx.db, now=to_unix("2026-09-26T00:30:00+02:00")) == {}
+
+
+def test_solar_elevation_matches_skyfield():
+    skyfield = pytest.importorskip("skyfield.api")
+    skyfield_data = pytest.importorskip("skyfield_data")
+    load = skyfield.Loader(skyfield_data.get_skyfield_data_path(), expire=False)
+    ts, eph = load.timescale(builtin=True), load("de421.bsp")
+    for iso_t, la, lo in (("2026-09-21T06:00:00Z", 61.4, 11.0), ("2026-09-25T16:30:00Z", 62.0, 9.0),
+                          ("2026-10-05T09:00:00Z", 64.0, 13.0), ("2026-09-23T04:30:00Z", 58.3, 7.9)):
+        t = to_unix(iso_t)
+        alt = (eph["earth"] + skyfield.wgs84.latlon(la, lo)).at(ts.from_datetime(from_unix(t))).observe(eph["sun"]).apparent().altaz()[0]
+        assert float(M.solar_elevation(la, lo, t)) == pytest.approx(alt.degrees, abs=0.05)
+
+
+def test_met_units_attribute_beats_value_heuristic():
+    """A clear hour delivered in % (max 1 %) looked like a 0-1 fraction to the value heuristic and
+    became 100 % cloud; the CF units attribute is used when present."""
+    assert M.to_standard_units("cloud_fraction", np.array([0.0, 1.0]), "%").tolist() == [0.0, 0.01]
+    assert M.to_standard_units("cloud_fraction", np.array([0.2]), "1").tolist() == [0.2]
+    assert M.to_standard_units("relative_humidity", np.array([0.8]), b"1").tolist() == [80.0]
+    assert M.to_standard_units("air_temperature_c", np.array([283.15]), "K")[0] == pytest.approx(10.0)
+    conv = M.MetNordicProvider.VARS["cloud_area_fraction"][1]
+    assert conv(M.to_standard_units("cloud_fraction", np.array([0.0, 1.0]), "%")).max() == pytest.approx(0.01)
+
+
+def test_weather_bridge_does_not_block_the_runner(tmp_path):
+    """on_tick used to download and score inline (THREDDS timeout 90 s per request) on the runner's
+    frame/audio loop; the default is now a worker thread whose result a later tick collects."""
+    import threading
+    import time as _t
+    gate = threading.Event()
+
+    class SlowProvider(M.ArrayProvider):
+        def fields(self, var, t0, t1, grid):
+            gate.wait(10)                                     # a slow / hanging MET server
+            return super().fields(var, t0, t1, grid)
+    ctx = ctx_for(tmp_path)
+    ctx.db.add_observation(Observation("rain_visual", from_unix(H - 1800), {"present": True, "intensity": 0.5},
+                                       analyzer="rain", confidence=0.8))
+    wet = [M.Field("precip_rate_mmh", H - 3600, H, halves(2.0, 0.0), "synthetic")]
+    wb = M.WeatherBridge({"providers": [SlowProvider(wet)], "met_grid": SG, "layers_dir": str(tmp_path / "layers"),
+                          "lookback_days": 1e5})
+    t0 = _t.time()
+    assert wb.on_tick(ctx) == [] and _t.time() - t0 < 2.0
+    gate.set()
+    out = []
+    while not out and _t.time() - t0 < 30:
+        _t.sleep(0.05)
+        out = wb.on_tick(ctx)
+    assert [o.kind for o in out] == ["weather_match"]
+    assert (tmp_path / "layers" / "weather_rain_visual_20260924.npz").exists()
+    assert wb.on_tick(ctx) == []                              # nothing new: no rebuild queued
+    assert getattr(wb, "_future", None) is None
+
+
+def test_live_recorder_falls_back_on_garbage(tmp_path):
+    """A 200 answer that is not readsb JSON (HTML error page) must fall through to the next source."""
+    class Html(FakeResp):
+        def json(self):
+            raise ValueError("Expecting value: line 1 column 1")
+
+    def handler(url, **kw):
+        if "adsb.lol" in url:
+            return Html(content=b"<html>502</html>")
+        return FakeResp({"now": 1790018900.0, "ac": [{"hex": "4791ac", "lat": 61.3, "lon": 10.9, "alt_geom": 26000}]})
+    rec = A.LiveRecorder(tmp_path / "live", centres=[(61.0, 10.0, 250)])
+    assert rec.poll_once(FakeSession(handler))
+    (f,) = list((tmp_path / "live").rglob("*.jsonl.gz"))
+    line = json.loads(gzip.open(f, "rt").readline())
+    assert line["src"] == "airplanes.live" and line["ac"][0][0] == "4791ac"
+
+
+def test_defaultno_partial_fetch_is_not_a_removal(tmp_path):
+    """fetch_default_no.py exits 0 after per-URL errors; a file missing from the manifest but still
+    linked must not raise 'removed' (and then 'new' again on the next good fetch)."""
+    a = make_snapshot(tmp_path, "20260925T100000Z", OLD_FILES)
+    partial = {k: v for k, v in OLD_FILES.items() if not k.endswith("met.json")}
+    b = make_snapshot(tmp_path, "20260925T103000Z", partial, links=list(OLD_FILES))     # met.json failed, still linked
+    d = DN.diff_snapshots(a, b)
+    assert d["ok"] and d["removed_files"] == [] and d["new_files"] == []
+    c = make_snapshot(tmp_path, "20260925T110000Z", OLD_FILES)
+    d2 = DN.diff_snapshots(b, c)
+    assert d2["new_files"] == [] and not any(k == "defaultno_new_files" for k, _, _ in DN.diff_events(d2))
+    gone = make_snapshot(tmp_path, "20260925T113000Z", partial)                       # really gone: no longer linked
+    assert DN.diff_snapshots(c, gone)["removed_files"] == ["https://default.no/data/met.json"]

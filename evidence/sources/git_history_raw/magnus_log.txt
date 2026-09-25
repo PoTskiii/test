@@ -1,0 +1,1042 @@
+=== e1b59cf 2026-09-23 14:15:33 +0200
+Initial commit
+
+=== c0c849b 2026-09-23 14:30:30 +0200
+Scaffold Hordejakten map app with drive-time data
+- Set up Vite + React + TypeScript + Tailwind + shadcn/ui
+- Add OSRM drive-time grid from Oslo and Norway outline (public/data)
+- Add build script for the drive-time grid (scripts/build_drivetime.py)
+- Add hint, whiteboard, places and map-layer content in Norwegian
+- Add probability model, geo helpers, place-name lookup and Leaflet map
+- Work in progress: App shell and side panels not wired up yet
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== ecf0260 2026-09-23 14:42:03 +0200
+Build map UI with panels, model controls and flight tracks
+- Add App shell: draggable bottom sheet on mobile, sidebar on desktop
+- Add layer panel with legend, theory presets, weights and top areas
+- Add hint list with filters, compass sketch and letter anagram tool
+- Add whiteboard log and stream tab with click-to-load embed
+- Add 49 aircraft tracks around 21:29 and a flight factor in the model
+- Update default.no candidates to the 16:42 fusion and add new hints
+- Look up place names via Kartverket and keep map popups clear of overlays
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== f99df64 2026-09-23 14:43:51 +0200
+Add Norheimsund letters theory and README
+- Recognise the referral letters as an anagram of NORHEIMSUND (one N short)
+- Add Norheimsund theory pin, model factor and preset
+- Turn on the matching map layer when a theory preset is chosen
+- Add Norwegian README with data sources and rebuild steps
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 520fd05 2026-09-23 14:49:37 +0200
+Add theory ranking with percentages, Innlandet and Windy exclusions
+- Add Teorier tab: six theories ranked by a transparent Bayes-style score
+- Let each hint be toggled, with up/down chips showing its effect per theory
+- Show theory areas with live percentages as a map layer
+- Replace cloud zone with blue areas traced from the new Windy map (excluded)
+- Add Innlandet county layer, model factor and default preset
+- Add Børsen interview facts: slept most of the trip, carried into the forest
+- Add "Plutselig tilbake!" poster hint
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 4db364e 2026-09-23 14:50:30 +0200
+Keep excluded cells out of the probability classes
+- Cells scoring under 1 % of the best cell are never ranked into a colour class
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 58e737c 2026-09-23 14:59:05 +0200
+Fix review findings in map, model and theory estimates
+- Make area layers click-through so cell popups show; list areas in popup
+- Show "utelukket" instead of "topp 100 %" for excluded cells
+- Split Østerdalen into Løten/Elverum (under the plane) and Rena/Åmot
+- Judge Windy exclusion over each theory's whole area, not its centre
+- Reduce double counting between plane, default.no and consensus hints
+- Add optional "picked up Monday" hint and a Gjøvik theory
+- Let the Norheimsund preset ignore the Windy exclusion
+- Add "Sjekk et punkt" for pasted coordinates or Google Maps links
+- Fade the grid at close zoom so the base map stays readable
+- Fix camera heading, sign direction, default.no names and Froland text
+- Add code candidates (5008, 5528, 2188), tips, sofa and cabin hints
+- Retry place-name lookups after network errors
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== b671b5b 2026-09-23 14:59:22 +0200
+Note HORDE MINUS as exact anagram of the referral letters
+- Explain that HORDE MINUS uses all ten letters while NORHEIMSUND needs one more N
+- Lower the Norheimsund letters factor from 4 to 2
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 4e26d93 2026-09-23 14:59:54 +0200
+Add Roman numeral and binary theories for the sign hands
+- Describe both readings in the sign hint and in the code candidates hint
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 5b2a319 2026-09-23 15:00:10 +0200
+Add note that people are reportedly at the box
+- Add hint with the chat quote and what to watch for on the stream
+- Show a "Siste nytt" notice at the top of the Teorier tab
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 52c0b78 2026-09-23 15:02:03 +0200
+Add sunny-today areas, Solør theory and fake-light doubt
+- Add areas that were clear on satellite 23.09 as map layer, model factor and theory hint
+- Add Flisa/Haslemoen (Solør) as a theory and tip pin
+- Add hint that the stream's sunlight may be filtered or fake
+- Note that several people point to Digeråsen
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== cf75140 2026-09-23 15:05:31 +0200
+Add codes and beliefs summary with links, and Bergen 118° line
+- Summarise all code candidates, letter readings and community beliefs at the top of Hint
+- Link each summary item to its related hints, with jump and highlight
+- Add JAKTEN idea and words to try in the app's credit-score box
+- Add 118° line from Horde AS in Bergen as map line, model factor and hint
+- Note that the hands under the sign seem to change position
+- Add "LAST NED HORDE APPEN" to the whiteboard log
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 3885ab8 2026-09-23 15:07:29 +0200
+Add most likely codes, Tretopphyttene tip and Østfold note
+- Show the two most likely codes (5008 and the Kodejakten code) with backups
+- Rank all code candidates as high, medium or low
+- Change lock count to two code locks
+- Add Tretopphyttene in Ringsaker as tip, hint and theory
+- Note that Fredrikstad, Sarpsborg and Halden were overcast all day
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== e1ca795 2026-09-23 15:08:31 +0200
+Filter hints by confirmed and not confirmed
+- Replace hint filters with Alle, Bekreftet, Ikke bekreftet and Om stedet
+- Keep the filter row pinned while scrolling the hint list
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== f3eb2bb 2026-09-23 15:13:30 +0200
+Make the panels easier to understand
+- Add a first-visit intro explaining the three main tabs
+- Show a For/Mot line per theory and tap to see every hint's effect
+- Tuck the hint switches and the method explanation into collapsible sections
+- Rebuild the Kart tab: focus picker with descriptions, grouped layer chips,
+  colour explanations only for active layers, weights under Avansert
+- Make the code, letter and belief summaries collapsible, keep likely codes visible
+- Explain the status labels at the top of the Hint tab
+- Fix the compass sketch to show the camera north-east, facing south-west
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== bdffb03 2026-09-23 15:15:17 +0200
+Mark 118° as the sign direction, confirmed by Anja
+- Read the whiteboard as "ØST CA 118 · RETNING SKILT"
+- Mark the 118° hint as confirmed and explain what the sign may point at
+- Update sign hint, compass caption, search-sector and theory texts
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 6d6d45c 2026-09-23 15:16:05 +0200
+Add "Reven heter Benny" with matching place names
+- Add the whiteboard line and a hint about the fox's name
+- Pin Bennyøy (Nome, near the Bergen 118° line) and Benningstad (Løten)
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 45200c5 2026-09-23 15:16:48 +0200
+Add chat quote backing Innlandet
+- Quote "Det er null tvil, været, sola, skogen og alt" in the Innlandet hint and summary
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 2eb6f94 2026-09-23 15:17:06 +0200
+Update sign direction to 118–120° per Anja
+- Add the new whiteboard line and widen the stated direction to 118–120°
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 85d9ded 2026-09-23 15:17:47 +0200
+Link the squirrel to hunting in Innlandet
+- Note that squirrels were hunted for meat and fur in Innlandet
+- Connect it to the squirrel hint and the JAKTEN letter reading
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== e94d4db 2026-09-23 15:18:47 +0200
+Exclude the Odal–Jessheim morning fog area
+- Add fog zone from a local report and draw it with the excluded weather areas
+- Count it in the map model and in the theory weather factor
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 86d52b8 2026-09-23 15:22:56 +0200
+Add "Alt vi har" mode, sun clues, new sign geometry and cabins
+- Add a mode switch: "Alt vi har" (hints + what people say) or "Bare hint"
+- Tag community opinions as "Folk sier" and add tips as weak evidence
+- Add sunrise-before-07 and solar-noon clues (point to 11–12° E)
+- Sign stands WNW and points 118–120° at the box; flip the search sector to 120°
+- Camera now NNE filming ~208°; redraw the compass sketch
+- Add Bergen line corrected for magnetic declination (~123°)
+- Add Tretopphyttene cabins layer with booking status, and why it is unlikely
+- Add windowless, no-wifi break place and "Horde avoids cabins" hints
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 9ea67b3 2026-09-23 15:23:29 +0200
+Weaken the squirrel clue
+- Squirrels live everywhere, so lower its factors to 1.1 and say so in the hint
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 0d70d0c 2026-09-23 15:31:43 +0200
+Calibrate estimates and apply UX checklist
+- Stop sun clues from favouring Solør over Løten on 1–3 minute differences
+- Soften the sun-today and plane factors, and raise the "elsewhere" prior to 4
+- Add visible focus outlines and respect prefers-reduced-motion (also map flights)
+- Make chips, filters, links and sheet handle at least 44 px to tap
+- Raise small text sizes for mobile readability
+- Collapse the legend to a pill on mobile and show a loading state
+- Put the theory ranking first, with an "anslag, ikke fasit" note
+- Label only the four largest theories on the map to avoid overlap
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 6a33959 2026-09-23 15:32:04 +0200
+Add "+5" on the sweater with code readings
+- Add hint with three readings: Caesar +5, add 5 to a code, or temperature
+- Add 5013 and 0553 as low-probability code candidates
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 015d617 2026-09-23 15:32:37 +0200
+Note that +5 on the sweater numbers gives nothing
+- Record that shifting 7 10 5 12 4 6 18 9 by ±5 gives no words
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== a49eadd 2026-09-23 15:34:15 +0200
+Decode more of the trouser letters
+- MT WI JO FP YJ S@ MT reads HORDEJAKTEN@HO…, likely hordejakten@horde.no
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 66e31ce 2026-09-23 15:39:49 +0200
+Separate confirmed facts from guesses and fix review findings
+- Rename "Harde fakta" to "Bare bekreftet" and drop the uncertain 7 h drive
+- Turn drive time off by default in theories and most map presets
+- Add "Alt vi har" map preset as default, matching the Teorier tab
+- Add "Dette vet vi sikkert" card and a clearer status explanation
+- Colour map cells by fit relative to the best cell, so ties share a colour
+- Add the new Horde video (1raIm3ANsAI): +5 on the back, birch-rich forest
+- Log the unreadable whiteboard sketch
+- Cache weight-independent factors per cell (slider ticks now under 1 ms)
+- Use stable keys for map buttons and cancel stale "Sjekk et punkt" popups
+- Run the sheet height effect only when height, device or viewport changes
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== e72a665 2026-09-23 15:41:27 +0200
+Add second plane NOZ9EG and the Ringsaker track
+- Mark NOZ9EG (southbound over Ringsakfjellet at 21:29) as second candidate plane
+- Re-centre the Ringsaker theory on its track, raise its plane factor to 2.5
+- Note NOZ9EG passed 3 km from Tretopphyttene at 21:31, and growing suspicion
+- Add Nittedalen as a tip that fits poorly, and the "two tracks + sun" belief
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== eb4093e 2026-09-23 15:43:01 +0200
+Show the whiteboard sketch with best reading
+- Read the sketch as KAMERA on top, the box in the middle and SKILT to the right
+- Show the original and a contrast-enhanced image in the Tavla tab
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 5d966c0 2026-09-23 15:43:18 +0200
+Anchor whiteboard thumbnails to the board
+- Crop sketch thumbnails from the bottom so the board shows, not Anja's face
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 7983773 2026-09-23 15:45:19 +0200
+Add "KAMERA 41 ØST" and use it to check the sunlight
+- Camera stands ~41° (NE) and films ~221°; update hints, facts and compass sketch
+- It matches default.no's sun-only estimate (219–220°), so the sunlight looks real
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 5178ea0 2026-09-23 15:45:37 +0200
+Note in the solar-noon clue that the sunlight checks out
+- Camera direction from the sun matches "KAMERA 41 ØST"
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 6cddb71 2026-09-23 15:46:40 +0200
+Rule out Froland: the weather does not match
+- Mark Froland as excluded and add a weather factor that pulls Agder down
+- Update the Froland pin, summary entry and Agder theory text
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 0a6597f 2026-09-23 15:50:27 +0200
+Sort the whiteboard log newest first, with a toggle
+- Keep TAVLE in arrival order and fix two entries that were out of order
+- Show newest first by default, with a button to switch to oldest first
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== ce85e10 2026-09-23 15:51:20 +0200
+Mark Tretopphyttene and Prøysenstua as checked
+- A hunter checked all Tretopphyttene cabins and Prøysenstua, nothing found
+- Turn the cabin suspicion into a small minus for Ringsaker (0.8)
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== fe51e10 2026-09-23 15:55:06 +0200
+Add clues from default.no we were missing
+- Add sound and bird hints with low confidence, and "no trains, cars or shooting"
+- Add clear-cut search rule, morning roof dew and a quiet-site fact
+- Show default.no's strongest terrain spots (Rena, Tolvmilskogen, Kirkesjøvegen)
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 90f20c3 2026-09-23 15:57:09 +0200
+Show "Siste nytt" prominently at the top
+- Add SISTE_NYTT list; newest item shown large at the top of the Teorier tab
+- Lead with the new Horde video showing +5 and the sweater codes
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 06b82f0 2026-09-23 16:01:01 +0200
+List every Norwegian word and place the referral letters can spell
+- Add 13 letter theories rated strong/medium/weak, with map links
+- Add searchable lists: place names in theory areas (with leftover letters),
+  full 10-letter anagrams, longest words, common words, all place names
+- Build the lists offline from nb_NO dictionary, word frequencies and GeoNames
+- Mark stream audio as fake/looped, so sound clues are not used
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== aa81ebf 2026-09-23 17:56:45 +0200
+Add Rudshøgda/Prøysen theory and a letter word generator
+- Add Rudshøgda as a theory: fox, crow and squirrel are all characters in
+  Prøysen's "Sirkus Mikkelikski", Prøysenstjerna stands behind Prøysenstua,
+  and NOZ9EG passed 6–11 km away at 21:31
+- Add Prøysenstua and Prøysenstjerna pins, hint card, belief entry and top news
+- Replace the "Reven og kråka" reference with Sirkus Mikkelikski
+- Add a word generator (all 10 letters, one word, or place name) to the letters section
+- Export all 552 full anagrams and 579 words for the generator
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== df596d3 2026-09-23 18:01:37 +0200
+Add "LYDTETT · SOL · VINDSTILLE" whiteboard (17:49)
+- Add to whiteboard log, sure facts, a hint and top of Siste nytt
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 125f83f 2026-09-23 18:01:58 +0200
+Add Kodejakten findings from the game's source code
+- One padlock code is given by the server after all four games are verified
+- Dart colours: blue add, yellow subtract, pink multiply, purple divide
+- The runner "Alf" is Horde's frontman, not Alf Prøysen
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== c4c0aa3 2026-09-23 18:02:53 +0200
+Add the 5-digit electronic door lock
+- Anja wrote the door has an electronic lock with 5 digits
+- Add to whiteboard log, facts, codes card (with 5-digit guesses) and Siste nytt
+
+Co-Authored-By: AI Assistant <noreply@example.com>
+
+=== 35ba6b9 2026-09-23 18:16:04 +0200
+Refresh default.no candidates and add flight-route filter hint
+- Update default.no top cells to their latest clear cells (Løten/Elverum, Rena-Åsta, Koppang, Finnskogen, Trysil)
+- Add hint on their "seen+heard plane" filter keeping western Østerdalen
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+=== b7a2c7f 2026-09-23 18:17:02 +0200
+Note Kodejakten backend is not live yet
+- API returns 503 not_configured on all endpoints, so no code can be issued yet
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+=== 4a9f3ee 2026-09-23 19:01:16 +0200
+Add fjellmark, mushroom and 2-min whiteboards
+- Log four new whiteboards: typisk fjellmark, masse sopp, mose på steiner,
+  ikke vann, ca. 16 grader, gikk 2 min inn i skogen
+- Add fjellmark hint and factor (favours Ringsakfjellet/Sjusjøen and the Rena
+  hills, weakens lowland Rudshøgda, Gjøvik and Solør)
+- Put the new boards at the top of Siste nytt and in the sure facts
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 41304dc 2026-09-23 19:04:42 +0200
+Show every place-linked hint on the map, and add Kodejakten game hints
+- Add "Hint på kartet" layer (on by default): one marker per place, grouping
+  hints, community tips and Siste nytt within ~1 km; popups link to the hint card
+- Give place positions to hints that lacked one (trip, plane, fog, sun, cabins)
+- Add game hints: dart solving rule, the four games, and Horde's own rules
+  (no one at the office knows, hunting season, envelope in box, Anja on our side)
+- Close the map popup when opening a hint, and cap older Siste nytt at three
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 6763e06 2026-09-23 19:08:21 +0200
+Add community exclusion map (no mushrooms, mountain birch) and powerbank codes
+- Georeference the shared exclusion map and store it as a 0.05° grid
+- Add "Utelukket av fellesskapet" layer (on by default), a model factor, and a
+  theory factor from each area's open share
+- Add hints for the exclusion map and the powerbank idea, with 5271 and 27000 as
+  low-probability codes, and put the map at the top of Siste nytt
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 24c4d59 2026-09-23 19:10:56 +0200
+Add "Spill" tab with Kodejakten guide and dartboard calculator, and fix lock count
+- New tab with how to solve each of the four games, from the game's source code
+- Dartboard calculator: centre number plus rings by colour and numbers
+- Explain the ending: code shown automatically, no lock to open yourself
+  (the rotation degrees are only the shackle animation)
+- Lock count is 3: 2 padlocks on the money box, 1 electronic door lock for Anja
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 89d7dc0 2026-09-23 19:12:47 +0200
+Add "Lite med fly her · sikkert med vilt" whiteboard (19:09)
+- Log the board with its image, add a hint and put it at the top of Siste nytt
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== b55eafc 2026-09-23 19:13:49 +0200
+Remove the pink "no mushrooms" exclusion, which was not correct
+- Drop pink cells from the exclusion grid and the map colours
+- Recompute open shares (Gjøvik 95 %, Røros 20 %) and update texts
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 405c497 2026-09-23 19:15:52 +0200
+Switch pink to red, and add "Skiltet er borte" whiteboard (19:12)
+- Replace magenta/pink/rose UI colours with red (LIVE, Siste nytt, pins, statuses,
+  theory and probability colours); the dartboard's own pink is kept
+- Log the 19:12 board with image, add a hint and top news that the sign was removed
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 05d8624 2026-09-23 19:16:28 +0200
+Make the excluded area read as red rather than pale pink
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 1971621 2026-09-23 19:22:38 +0200
+Add Analyse tab with audio, birds, plane sounds and municipality ratings
+- Audio: default.no's finding that the stream audio loops (~24 h and 48 h lags),
+  sound tag counts and hand-labelled plane clips
+- Birds: 53 Norwegian species recognised on the stream, with caveats
+- Municipality ratings and confirmed-facts list from hordejakten.vercel.app,
+  plus a "Kommunevurdering" map layer
+- Add the blindfold fact (she is blindfolded every time she leaves the box)
+- Credit default.no and hordejakten.vercel.app in every section and layer
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== d9e3376 2026-09-23 19:37:04 +0200
+Add linkable sections via URL params and a wide desktop panel
+- ?fane=<tab> opens that tab, and the URL follows tab changes
+- ?hint=<id> opens and highlights one hint; each hint card gets a copy-link button
+- Desktop panel is wide by default (58 %, max 900 px) and shrinks when the map is used
+- Two-column lists in hints, theories, whiteboard and games when the panel is wide
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 6f8b1b5 2026-09-23 19:40:24 +0200
+Lay out the wide panel as newspaper columns, and put the Kodejakten result first
+- Blocks keep their narrow look and flow into columns of about 21rem when the panel is wide
+- Card lists use masonry columns; the theory ranking stays row by row
+- The wide panel always leaves at least 480 px for the map
+- «Når alle fire er klart» moves to the top of Spill, with the lock message in bold
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== fb2ac52 2026-09-23 19:45:25 +0200
+Tidy the wide layout, mark the edge of the exclusion map, and stop Analyse hanging
+- Spill: result box full width, warning and button in one row, games in a 2x2 grid,
+  and a two-column calculator
+- Teorier: latest news split into two columns, header next to the mode switch
+- Analyse: max width, 12 s timeout with an error and retry instead of loading forever
+- Draw a dashed line where the community exclusion map image ends in the west
+- Add the shadcn dialog component for the upcoming practice games
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== bfa356f 2026-09-23 19:51:06 +0200
+Add practice versions of the four Kodejakten games
+- A modal per game, opened from «Øv på …» on each game card, with the games lazy loaded
+- Kill the Bill: rules ported from the game's shared rules file, identical per tick in tests
+- Dartskiven: same board geometry, colours and keypad, a local board generator, and «Vis fasit»
+- Bill Runner and Flappy-Alf: client constants and physics loop ported; the course and
+  some physics come from Horde's server, so those are estimates and the modal says so
+- Everything drawn with simple shapes, with no Horde sprites or fonts
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== fc71636 2026-09-23 20:03:59 +0200
+Mark everything west of the community exclusion map as excluded
+- Fill Norwegian land west of 8.4° E with red cells, since the image never covered it
+- Remove the dashed «map ends here» line and update the legend text
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 602389f 2026-09-23 20:09:13 +0200
+Add a live Kodejakten status check and remove the dart calculator
+- api/kodejakten.ts: Vercel edge function that asks Horde's status endpoint with a
+  dummy token (starts no session), cached 60 s so Horde gets at most 1 call a minute
+- Spill: status box checks on open, every minute, and on «Sjekk nå», with a toast
+  when the game goes live
+- Wide panel: the green result box and the status column sit side by side
+- Remove the dart calculator; the Dartskiven practice game replaces it
+- Vite dev server runs the api/ function locally
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 1e342f9 2026-09-23 20:22:29 +0200
+Use Horde's real Alf sprites in the practice games and explain Dartskiven better
+- Kill the Bill, Bill Runner and Flappy-Alf use the original Alf sprites and ported
+  drawing code, colours, frame and overlay text
+- Dartskiven: always-visible 4-step guide with colour chips, a worked example board
+  and the streak rule; the «Les mer» toggle is gone
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== addc834 2026-09-24 18:26:05 +0200
+Add app hints ENKODE (LD6788) and «Ekornet kan klatre» (FROLAND)
+- Two new hints and two news items, with 6788 as a code candidate
+- Froland marked as unlikely rather than excluded, and a new evidence item that
+  lifts Agder a little
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 7ebb743 2026-09-24 18:30:25 +0200
+Add HORDEMINUS «2,7 eiffeltårn» hint, 0891 as a code and the Facebook globe frame
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 2995786 2026-09-24 18:31:05 +0200
+Eiffel hint: 300 m without antenna and 330 m with it, so 810 or 891 m; add 0810
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== b03c6a9 2026-09-24 18:32:59 +0200
+Add Horde's «codes are in the app» reply, +5 code variants, the «Ingen pizza enda» whiteboard and the community 800–900 moh map layer
+- New map group «Høyden (2,7 eiffeltårn)»: the community's 800–900 moh map
+  (georeferenced) and a slot for the computed 810–891 moh near-road layer
+- Height layers get their own map pane so they stay visible when zoomed in
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 4bd3590 2026-09-24 18:33:21 +0200
+Add whiteboard «Hjelper veldig at jeg kan se det dere skriver <3»
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== dcec931 2026-09-24 18:33:34 +0200
+Add photo for the «kan se det dere skriver» whiteboard
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 91c7e7d 2026-09-24 18:33:50 +0200
+Add whiteboard «Skal klare å holde ut til noen finner meg»
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== c0b1da8 2026-09-24 18:34:08 +0200
+Add whiteboard «Hjemmelaget pepperonipizza, dressing fra Coop, knallgodt»
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 4e65b1c 2026-09-24 18:35:42 +0200
+Add 5 whiteboards; «kom fra den veien ←» flips the parking search sector to ~300°
+- Whiteboards: «Jeg har troa på dere», «Kom fra den veien ← · ingen stier»,
+  «Ingen hytte i nærheten», «Ingen lyd i boksen overhodet», «Mamma <3»
+- New hints: the came-from direction (car SE of the box) and no cabin nearby
+- The search sector from parking now points ~300° (NW), not 120°
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== caf7bcb 2026-09-24 18:36:00 +0200
+Add whiteboards «Mamma <3» (photo) and «Gråvær hele dagen»
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 679260b 2026-09-24 18:38:01 +0200
+Add Kroktjennet/Hemmeldalen 891 moh lead and the SE-road flag in the height layer
+- Place marker at the ~891 moh top NW of Kroktjennet (Åmot), inside Hemmeldalen
+  nature reserve, with arguments for and against
+- Height layer: strong colour where a road lies to the SE, faint otherwise
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 9264140 2026-09-24 18:38:44 +0200
+Note that the Horde AI summary is the chatbot's own reasoning, with 875 m
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 39e2789 2026-09-24 18:39:03 +0200
+Add the soldiers-and-drone frame from the «Ingen har funnet Anja enda» video
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 1aab84b 2026-09-24 18:42:43 +0200
+Add whiteboard «5 siffer, ganske sikker» (08:24)
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== a269415 2026-09-24 18:43:35 +0200
+Add whiteboards on the locks and «det har vært hogd der jeg gikk →»
+- The logging arrow (right, ~310°) and «kom fra den veien ←» (~130°) describe the
+  same walk: from the car in the SE, through an old clear-cut, NW to the box
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 7d0554e 2026-09-24 18:44:33 +0200
+Add default.no layers: 800–900 moh band, 800–900 m from road, search stops, rejected areas, field notes and Coop shops (with credit)
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== a9eacd9 2026-09-24 18:44:55 +0200
+Mark all whiteboards from 24.09 by date only, since their order is unknown
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 38e9f02 2026-09-24 18:46:43 +0200
+Add the confirmed Horde AI «2,7 eiffeltårn» reply to «Dette vet vi sikkert»
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 94558c2 2026-09-24 18:46:57 +0200
+Mark the letters hint as solved: HORDE MINUS
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 4d069c1 2026-09-24 18:49:27 +0200
+Add rain at 11:05 (Anja) matching rain in Rena as a hint and weak evidence for Rena
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 1125b60 2026-09-24 18:52:34 +0200
+Bundle the analysis data into the app so the Analyse tab never has to fetch
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 2c6783e 2026-09-24 19:00:14 +0200
+Make the Kart tab easier: ready-made views, search, filters and ⓘ explanations
+- Five views (Standard, Høyden 810–891 moh, Ute i felt, default.no, Vær og fly)
+  that switch on exactly the right layers
+- Search and filter chips (Alle, På nå, Fakta, Beregnet, Tolkning), with a
+  one-line key to what the labels mean
+- Each layer is a row with a short description, a switch and an ⓘ that shows
+  the explanation, legend and source
+- «Slå av alle» and per-group «x av y på» counts
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 71778ff 2026-09-24 19:02:23 +0200
+Add all remaining default.no map layers, loaded only when switched on
+Skytefelt, hogst, konkrete steder, søkeområder, gå-soner, pilegrimsleder,
+bær, orrfugl/storfugl, pizza, flyene ved hendelsene, stille himmel,
+flylyd-match, regn, radar, MET, værstasjoner, veikameraer, satellitt 21.09
+and all nine fusion models. Every layer and popup credits default.no.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 1ce4c01 2026-09-24 19:04:15 +0200
+Add «Mer fra default.no» to the Analyse tab, and draw search areas as outlines
+Flyene Anja reagerte på, sola og kameraet, været (radar, regn, MET,
+veikameraer, kameraet time for time), satellittdatoer, stille himmel og
+flylyd, orrfugl og gå-soner ved letestoppene. Bundled from
+src/data/defaultno_mer.json, with a default.no credit under each part.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== d091bcf 2026-09-24 19:05:31 +0200
+Add default.no layers to the Kart views and a «Hogst, stier og skytefelt» view
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 8c4769a 2026-09-24 19:05:53 +0200
+Shorten the default.no layer texts for the new Kart tab rows
+Each kort is a plain line under 45 characters, and each forklaring says in
+one to three sentences what the colours mean and why it matters.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 764b796 2026-09-24 19:06:25 +0200
+Guard layer zoom against tile layers; add hogst, trails and quiet sky to views
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== e4f04b5 2026-09-24 19:07:59 +0200
+Credit default.no everywhere their data is used
+- Hints that use default.no data now say «Takk til default.no» in the source field
+- Candidate and terrain pins and plane-track popups get a credit line
+- The model factor, theory evidence and the two older layer sources get the same
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 89478ba 2026-09-24 19:08:58 +0200
+Add a remove (×) button per layer in «Hva ser jeg?»: on hover on desktop, always on touch
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 14d06ce 2026-09-24 19:34:06 +0200
+Credit Kartverket and OpenStreetMap contributors on the 810–891 moh layer
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 7679cfe 2026-09-24 19:41:40 +0200
+Add big credit to the «Hordejakten 2026» Discord and invite people to join
+- Large Discord card under «Siste nytt» on Teorier, with a «Bli med på Discord» button
+- Compact join banner on Hint, Tavla and Stream
+- Discord first in the Analyse «Takk til» list
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== e537086 2026-09-24 19:49:03 +0200
+Publish the 810–891 moh near-road layer and give the red map distinct colours
+- 17 234 spots at 790–911 moh within 900 m of a drivable road (OSM), 12 041 of
+  them with a road to the SE («kom fra den veien ←»); heights from Kartverket DTM
+- Probability classes now go dark red → orange → yellow → pale, so the top two
+  no longer look alike (also when the phone darkens the page)
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 4654dfd 2026-09-24 19:49:15 +0200
+Note that no road lies within 900 m of the Kroktjennet top
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 197e40e 2026-09-24 19:51:35 +0200
+Add the «Eiffel Tower in Texas» theory: Texas and Kompassen in Våler (Solør)
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== c5fa5a8 2026-09-24 19:53:44 +0200
+Add a drone law and safe-searching warning to the Kart and Stream tabs
+- Registration, A1/A3 competence, 120 m and line of sight, no-fly zones (airports,
+  shooting ranges, nature reserves) and privacy, with links to Luftfartstilsynet
+  and flydrone.no
+- Hunting season, allemannsretten and gates, and basic safety when searching
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 893318a 2026-09-24 19:55:48 +0200
+Stop marking unverified things as confirmed
+- «Ekornet kan klatre» (FROLAND) and «ENKODE» (LD6788) come from screenshots shared
+  in chat, so they are now «Usikker» and labelled «ikke bekreftet»; Froland is back
+  to «utelukket» and the FROLAND evidence is off by default
+- «Bind for øynene» (from another fan site) is now «Usikker»
+- The sign pointed 118–120°; «mot kassen» was an interpretation and is removed
+- Sure facts: she walked 5–10 min from the car and *thinks* it was uphill; the door
+  lock has 5 or 6 digits (she is «ganske sikker» on 5)
+- Code 6788 is now unverified and low
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 15cba55 2026-09-24 19:56:31 +0200
+Add a bold, easy-to-spot favicon and home-screen icons
+- Solid orange square with a thick white «H», matching the app logo
+- SVG plus 32 px PNG, apple-touch-icon and a web manifest with 192/512 px icons
+- Orange theme colour and a clearer tab title
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 42d485d 2026-09-24 19:59:02 +0200
+Check the drone and search rules against official sources and cite them
+Every drone rule now matches Luftfartstilsynet, Lovdata, Miljødirektoratet
+and Datatilsynet as of 24.09.2026, with a source link under each. Adds the
+16-year age limit, insurance and the 5 km airport zone, drops the
+unsupported 300 m and Ninox claims, and fixes the hunting dates.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== a141dae 2026-09-24 19:59:08 +0200
+Correct place names on map markers after checking against Kartverket
+- NOZ56U was over Hamar (near the Løten border) at 21:29, not over Løten
+- The «Rena og Åmot» theory and tip sit in Stor-Elvdal: now «Rena–Evenstad»
+- The Løten theory is now «Hamar–Løten–Elverum (under flyet)»
+- Bjørneparken moved 1.2 km to its real position
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== e96bf5c 2026-09-25 08:23:41 +0200
+Add a map layer for protected areas where hunting is banned
+Each verneområde near the search area is classed from its own
+verneforskrift on Lovdata: all hunting banned, partly banned, allowed
+or unclear. A second layer shows only areas where all hunting is banned.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 0e60e4c 2026-09-25 08:24:33 +0200
+Move the hunting-ban layers to their own group and add a «Der jakt er forbudt» view
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== cfccae5 2026-09-25 10:58:54 +0200
+Replace Horde's Alf photo sprites with our own drawn figure
+- Six custom SVG parts (orange beanie, green jacket, blue trousers) on the same
+  363×1262 canvas and joint points, so the animations work unchanged
+- Delete the Horde webp sprites from the repo
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 970c493 2026-09-25 10:59:25 +0200
+Add Alf's TikTok-live quotes from 25.09 (real sound, animals may be hints, codes may be out, important hints this weekend) and mark the sound analysis as disputed
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 10c2793 2026-09-25 11:00:35 +0200
+Add animal hints: black grouse (shake the app) and badger (Horde Rewards), plus an overview
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 67eb8d0 2026-09-25 11:01:32 +0200
+The Horde Rewards animal may be Haaland's stuffed raccoon from Texas, not a badger
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== ddf93d0 2026-09-25 11:02:26 +0200
+Add Discord tips from 25.09: Birkebeinervegen/Ringsaker–Rena (fits 810–891 moh) and Finnskogen (too low, excluded)
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== a1a9e1c 2026-09-25 11:03:21 +0200
+Add the queue and 5-hour quarantine rule from Alf's TikTok live
+- New hint and «Siste nytt» item, a warning under «Mest sannsynlige koder», and a
+  line in the field rules; also say the door lock has 5 or 6 digits there
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 63416f0 2026-09-25 11:07:49 +0200
+Show only confirmed things on the map by default
+- New default for the red map: «Bekreftet: vær, sol og fly» (near road, clear sky,
+  sun on satellite and the 21:29 plane), without default.no, the community map,
+  Innlandet or drive time
+- Hint markers split: «Bekreftede hint» (on by default) and «Alle hint og tips»
+  (off), and «Vis på kartet» turns on the second one for unconfirmed hints
+- Default layers are now only the red map and confirmed hints; new «Alt vi har» view
+- The solved letter hint and the 5008 code no longer pin Norheimsund and Bergen
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== dc35cc6 2026-09-25 11:08:09 +0200
+Add Alf's TikTok note: no dangerous crossings like rivers, and wear visible clothes in hunting season
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== c7ed3f9 2026-09-25 11:08:55 +0200
+Add Alf's answer on live vs delayed sound: «det må du prøve å finne ut av»
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 46b320f 2026-09-25 11:10:38 +0200
+Add a «TikTok-live i dag» section on the front tab with all of Alf's quotes from 25.09
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 094b3b8 2026-09-25 11:16:15 +0200
+Update news order and layout, remove a fake item, and add Tommsen's three spots
+- «Siste nytt»: the TikTok item is the headline; the queue/quarantine rule moves to
+  «Dette vet vi sikkert» and is marked confirmed
+- On a wide panel the headline spans the full width and older news flows in two
+  columns underneath, instead of being squeezed into the right column
+- Remove the fake «Folk skal være ved kassen og prøve koder» hint, news item and tip
+- Add Tommsen's spots A (Tingstadbrua), B (Stor-Elvdal) and C (Gruvelia/Vardåsen)
+  with height, exclusion and plane checks
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 117ac73 2026-09-25 11:18:17 +0200
+Default map: the two planes she saw, and areas ruled out by weather, sun and vegetation
+- Split the plane layer: «Flyene hun så kl. 21:29» (NOZ56U and NOZ9EG, on by
+  default) and «Alle fly i lufta kl. 21:29» (all 49 tracks, off)
+- Default layers: red map, confirmed hints, the two planes, clouds and fog, sun
+  on satellite and the community's vegetation exclusion map
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 4a22327 2026-09-25 11:21:38 +0200
+Rename «Sol i dag» to «Sol 23.09»: the satellite image is from the daytime on 23.09
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 3c5c314 2026-09-25 11:22:49 +0200
+Fix Discord banner spacing on the Hint tab: move it out of the header block
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 01ab80d 2026-09-25 11:29:29 +0200
+Add 25.09 whiteboards, Haaland/Brauta lead, Discord talk, Froland rain, delay change
+- Whiteboards 25.09: overskyet and planes too far away to see, kan ikke teste
+  koder, ingen tåke (09:49), sikkert 5° (09:58), gjett riktig sang (10:21), and
+  pad on the outside of the glass (10:38)
+- Hint: planes are far up, not low approaches; the Haaland bottle stand / Brauta lead
+- «Hva folk tror»: many places in Innlandet are ~890 moh, but only a few match
+  the cloud day and the planes
+- Froland: rain there Wednesday evening, but none on the stream
+- Stream delay is now «trolig 20 sek–1 min (vi tipper)», not 45 s
+- Wind layer data and loader (drawing fix follows)
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 7b64e2b 2026-09-25 11:32:04 +0200
+Fix layers that are on at startup never drawing; show wind on the default map
+- Reset the lazy-loaded set when the map is created. In dev, React mounts the map
+  twice and the first load went into a discarded layer group
+- Log loader errors instead of swallowing them
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== dc68a8e 2026-09-25 11:35:58 +0200
+Show a «Live på TikTok» link while Horde is live on TikTok
+- api/tiktok.ts: Vercel edge function reading @horde.app's live-room status,
+  cached 60 s so TikTok gets at most one call a minute
+- The app checks every minute (and when the tab becomes visible) and shows a black
+  pill under the stream LIVE button only while they are live, linking to the live
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== f38dd45 2026-09-25 11:37:41 +0200
+Improve SEO for «Hordejakten», «Horde» and «Hordejakten 2026»
+- Title, description and keywords for the searches; canonical, robots meta
+- Open Graph and Twitter cards with a 1200×630 share image
+- JSON-LD: WebSite plus an FAQ (what it is, where the box is, codes, unofficial)
+- Crawlable Norwegian text inside #root, replaced by the app when it loads
+- robots.txt and sitemap.xml generated at build from VITE_SITE_URL in .env
+- A page title per tab
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 7e3690f 2026-09-25 12:43:29 +0200
+Add Terje T-shirt hint (1 116 897, points to Kredittskår + «terje») and the «God helg og god jakt» whiteboard with the song «Riverbank»
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 2f86bbf 2026-09-25 13:01:01 +0200
+The Terje T-shirt is not new: fold it into the «terje» hint as the clue that unlocks it, and drop the news item
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== e431102 2026-09-25 14:12:35 +0200
+Remove everything about Birkebeinervegen
+- Our tip, news item and theory evidence, the terrain pin and the fjellmark mention
+- Birkebeinerveien search stops, places and field notes from our copy of default.no data
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 996369d 2026-09-25 14:29:43 +0200
+Add Horde AI's odd «grevling» reply («1 Hordeminus = 3,4 grevlinger») as unconfirmed
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== dd51345 2026-09-25 14:56:38 +0200
+Explain where «Goldenrod · Riverbank» comes from (music label on Horde's story) and stop calling it a known song
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 337ddc2 2026-09-25 14:56:53 +0200
+Remove the Horde AI «grevling» reply: it was not repeatable in a new chat
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 67c7124 2026-09-25 14:59:47 +0200
+Say clearly that «Goldenrod · Riverbank» is the music on Horde's Facebook story
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 0cc7e96 2026-09-25 15:19:32 +0200
+Add whiteboard and hint «Ingen ferist som jeg merka»
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 4dd298c 2026-09-25 15:20:58 +0200
+Add the «nesten hjemme» tip: Anja is from Brumunddal, with checks for and against
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== e4bd434 2026-09-25 15:44:04 +0200
+Turn on the hunting-ban layer by default and explain that almost all forest has active hunting now
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== bb53374 2026-09-25 15:47:54 +0200
+Mark moose-hunting fields as unlikely; small-game and bird hunting are not excluded
+- New default layer «Elgjakt på statsgrunn»: Statskog's big-game hunting fields
+  (192 in southern Norway, from Geonorge). Hunters' names and phones are dropped
+- Moose hunting (rifle) is dangerous and the box is not in dangerous terrain; the
+  hunting text now says small-game and bird hunting (shotgun) do not exclude an area
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== c02748f 2026-09-25 16:05:25 +0200
+Add Hagina's field observation: birch is orange and thin at ~510 moh near Sjusjøen, further into autumn than on the stream
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 889d715 2026-09-25 16:06:47 +0200
+Count Hagina's birch observation: pull down high terrain around Ringsakfjellet/Sjusjøen
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 1dfb536 2026-09-25 17:49:20 +0200
+Add warning: 11 moose collisions in the last hour around Elverum
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== f965b2f 2026-09-25 17:49:44 +0200
+Add news: the stream is frozen due to technical problems, says Horde
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== ed45704 2026-09-25 17:51:16 +0200
+Add whiteboard «THILPRTE OESHF» = THE SHOPLIFTER, a nod to BobTheShoplifter (default.no), and credit him
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 37bd161 2026-09-25 17:54:47 +0200
+Add THILPRTE OESHF generator, balloon colours, the returning hand and the bobsleigh-track tip
+- New Hint-tab section with every word, full two/three-word combinations
+  (English and Norwegian), Norwegian place names, a shuffle generator and a word tester
+- Balloon letter colours added to the Shoplifter hint, linking to default.no's clip
+- Hint: one open hand is back where the Horde sign stood
+- Tip: «Bob» may point to the bobsleigh track at Hunderfossen, with checks
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== ac06655 2026-09-25 17:55:41 +0200
+Add: the Horde sign appears to be back in the 25.09 16:20 balloon video (via default.no)
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== e0365b0 2026-09-25 17:56:39 +0200
+Add Horde's «Cherry Blossom» post and use it to read the story music as song «Goldenrod» by «Riverbank»
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 9db1159 2026-09-25 17:58:07 +0200
+Add «Noen som vet fasiten» from the same THE SHOPLIFTER whiteboard
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 9a7359b 2026-09-25 18:02:41 +0200
+Add the 17:22 sighting: she pointed up while SAS50J was over east Stange (ADS-B), track on the map
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 29a1073 2026-09-25 18:40:37 +0200
+Lillehammer: the squirrel «Lille» is the official mascot for the town's 200th anniversary (2026)
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 72f623a 2026-09-25 18:44:29 +0200
+Add FILTER THE SHOP as an equally valid reading of THILPRTE OESHF (filter the shop in the Horde app)
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 971c9d6 2026-09-25 18:46:30 +0200
+FILTER THE SHOP is weaker: the shop in the Horde app has no filter
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 4d44d6a 2026-09-25 19:12:20 +0200
+Add whiteboard «35% bjørk, 25% gran, 40% furu» and the Jomfrua/Tjuven/Danseren theory
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== ae6dc67 2026-09-25 19:19:21 +0200
+Add a map layer for forest that matches «35% bjørk, 25% gran, 40% furu»
+- Share of pine, spruce and deciduous per ~2×2 km cell, counted from NIBIO's SR16
+  dominant-species map (96 WMS tiles over Eastern Norway), scored against 40/25/35
+- Linked from the new whiteboard hint and placed in «Vær og terreng»
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== a5526bb 2026-09-25 19:41:44 +0200
+Add HELHET FOR TIPS as a Norwegian reading of THILPRTE OESHF
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 91da5a7 2026-09-25 19:44:59 +0200
+Fix accordions that cut off content (e.g. the THILPRTE OESHF generator)
+- Remove the fixed Radix content height, which was measured before the async
+  data loaded and clipped the section after the first lines
+- Add HELHET FOR TIPS to the generator's answers
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 6c421a9 2026-09-25 20:53:24 +0200
+Add whiteboard 22.09 19:19 «ingen vann eller vannlyder» and drop the riverbank idea
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+=== 68faa86 2026-09-25 21:04:38 +0200
+Show height above sea level when tapping the map and in every point's popup
+- Kartverket DTM 1 m via ws.geonorge.no (CORS allowed), cached per point
+- Map-tap popup gets «Høyde over havet» with ground type; marker and point popups
+  get a «Høyde» line; heights of 790–911 m are flagged as matching 2,7 eiffeltårn
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+

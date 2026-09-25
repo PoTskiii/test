@@ -54,10 +54,22 @@ Degeneracies (the important part - read camera.py):
   plumb lines (``camera_vertical``) or a configured calibration the celestial
   layers are broad ridges along the viewing azimuth - which is the truth.
 
-Camera jumps: points are grouped into sessions (gaps > 3 h) and the Earth-fixed
-orientation G is fitted per session; a change > ``jump_deg`` (default 0.3 deg)
-or a timestamp in ``camera_moves`` starts a new pose segment with its own
-attitude (shared intrinsics).
+Camera jumps: points are grouped into sessions (gaps > 3 h) and each session's
+orientation is fitted with the intrinsics held at the global fit (a per-session
+focal length lets a short cloudy-day arc fake a 1-deg 'jump').  A change larger
+than ``jump_deg`` (0.3 deg) that is also significant given both sessions'
+covariances (Mahalanobis d^2 > ``jump_chi2``), or a timestamp in ``camera_moves``,
+starts a new pose segment with its own attitude (shared intrinsics).  Detection
+runs on all input points, before the single-pose outlier rejection that would
+otherwise discard a briefly seen bumped pose as 'outliers'.  A level calibration
+(``camera_attitude``) constrains only the pose in force when it was stored (or
+at its ``ts``); the other poses keep the weak default prior.
+
+Input hygiene: non-finite pixels / angles / luma are dropped; manually or
+automatically marked lines of one kind are capped in their *combined* level
+information (``vertical_floor_deg``: correlated tree leans, detector bias and
+lens distortion do not average down like sqrt(N)); degenerate families of level
+edges (all in one plane through the camera) are ignored.
 """
 from __future__ import annotations
 
@@ -83,6 +95,8 @@ UTC = timezone.utc
 
 DOMAIN = (58.0, 64.5, 4.5, 13.5)
 KM_PER_DEG_LAT = 110.57
+WEAK_PITCH = (0.0, 15.0)        # default level prior: cameras are mounted with a level horizon, pitch arbitrary
+WEAK_ROLL = (0.0, 3.0)
 
 
 # ============================================================================ data containers
@@ -145,6 +159,10 @@ class LevelReference:
     source: str = "default level prior (roll 0+-3, pitch 0+-15 deg)"
     # families of world-horizontal parallel segments: list of (segments (k,4), sigma_rad, unix t)
     families: list = field(default_factory=list)
+    # unix time at which the pitch/roll/heading priors were measured (e.g. when a camera_attitude calibration
+    # was stored).  With several pose segments (camera bumped) the priors then apply only to the segment
+    # in force at that time; the others get the weak default prior.  None: the priors hold for every segment.
+    att_t: float | None = None
 
     @property
     def n_lines(self):
@@ -155,7 +173,8 @@ class LevelReference:
         return len(self.segments) + len(self.families)
 
     def strength_deg(self):
-        """Rough 1-sigma of the zenith direction implied by the reference (deg): drives reliability."""
+        """Rough 1-sigma of the zenith direction implied by the reference (deg), reported in the layer
+        metadata / astro_fix as ``level_sigma_deg`` (x 111 km = the expected size of the fix)."""
         sp = self.pitch[1] if self.pitch else 90.0
         sr = self.roll[1] if self.roll else 90.0
         if len(self.families) >= 2:
@@ -186,7 +205,8 @@ class FitOptions:
     refraction: bool = True
     max_iter: int = 10
     chunk: int = 256
-    jump_deg: float = 0.3
+    jump_deg: float = 0.3              # a pose jump must rotate the camera by more than this ...
+    jump_chi2: float = 30.0            # ... AND be significant: Mahalanobis d^2 (3 dof; 30 ~ p 1e-6)
     session_gap_h: float = 3.0
     reject_k: float = 4.0
     refraction_sigma: float = 0.10     # prior on the refraction scale factor (nuisance, fitted per site)
@@ -280,6 +300,7 @@ class CelestialFitter:
     def __init__(self, pts: CelestialPoints, level: LevelReference | None = None, opts: FitOptions | None = None):
         import dataclasses
         self.pts = pts
+        self.pts_input = pts                          # before any outlier rejection (jump detection uses it)
         # private copy: the pose-segment assignment of plumb lines is fitter specific
         self.level = dataclasses.replace(level) if level is not None else LevelReference()
         self.o = opts or FitOptions()
@@ -360,13 +381,21 @@ class CelestialFitter:
         if lay.kr is not None:
             cols.append((p[:, lay.kr] - 1.0) / o.refraction_sigma)
         if attitude_priors:
+            s_meas = None
+            if lev.att_t is not None and lay.S > 1 and len(self.pts):
+                s_meas = int(self._pose_of_time(np.array([lev.att_t]))[0])
             for s in range(lay.S):
-                if lev.pitch:
-                    cols.append((p[:, 3 * s + 1] - lev.pitch[0]) / lev.pitch[1])
-                if lev.roll:
-                    cols.append((p[:, 3 * s + 2] - lev.roll[0]) / lev.roll[1])
-                if lev.heading:
-                    cols.append(((p[:, 3 * s] - lev.heading[0] + 180.0) % 360.0 - 180.0) / lev.heading[1])
+                if s_meas is None or s == s_meas:
+                    pitch, roll, heading = lev.pitch, lev.roll, lev.heading
+                else:
+                    # the calibration describes another pose of the camera: only the weak default applies
+                    pitch, roll, heading = WEAK_PITCH, WEAK_ROLL, None
+                if pitch:
+                    cols.append((p[:, 3 * s + 1] - pitch[0]) / pitch[1])
+                if roll:
+                    cols.append((p[:, 3 * s + 2] - roll[0]) / roll[1])
+                if heading:
+                    cols.append(((p[:, 3 * s] - heading[0] + 180.0) % 360.0 - 180.0) / heading[1])
         return np.stack(cols, axis=1)
 
     def _vert_res(self, p, lay):
@@ -452,18 +481,86 @@ class CelestialFitter:
         sig = float(np.sqrt((dof * s2 + nu0 * o.pixel_sigma_prior ** 2) / (dof + nu0)))
         self.sigma_px = max(sig, o.pixel_sigma_floor)
         G = [rotation_matrix(p_best[3 * s], p_best[3 * s + 1], p_best[3 * s + 2]) @ T[0] for s in range(self.S)]
-        # uncorrelated refraction error (anomalous refraction near the horizon) -> per-point variance
-        enu = ephem.topocentric_enu(self.pts.e_ef, self.pts.dist_km, r, T)[0]
-        alt = np.degrees(np.arcsin(np.clip(enu[:, 2], -1, 1)))
-        frac = o.refraction_model_err + o.refraction_horizon_err * np.exp(-np.maximum(alt, 0.0) / 2.0)
-        err_rad = np.radians(frac * ephem.refraction_deg(alt, o.pressure_mbar, o.temp_c))
-        self.model_var = (err_rad * np.exp(p_best[lay.lnf]) * self.pts.scale) ** 2 if o.refraction else 0.0 * alt
+        self.model_var = self._model_var(self.pts, p_best[lay.lnf], r, T)
         return RefFit(p=p_best, lay=lay, G=G, sigma_px=self.sigma_px, rms_px=float(np.sqrt(rss / max(N, 1))),
                       n=N, n_rejected=n0 - N, lat0=lat0, lon0=lon0)
 
-    def detect_jumps(self, ref: RefFit, moves=()):
-        """Split into pose segments at known moves and at sessions whose G differs > jump_deg."""
-        pts, o = self.pts, self.o
+    def _model_var(self, pts, lnf, r, T):
+        """Extra per-point variance (px^2) for uncorrelated refraction error (anomalous refraction near the
+        horizon: refraction_model_err of R high up, growing by refraction_horizon_err with e-folding 2 deg)."""
+        o = self.o
+        if not o.refraction or not len(pts):
+            return np.zeros(len(pts))
+        enu = ephem.topocentric_enu(pts.e_ef, pts.dist_km, r, T)[0]
+        alt = np.degrees(np.arcsin(np.clip(enu[:, 2], -1, 1)))
+        frac = o.refraction_model_err + o.refraction_horizon_err * np.exp(-np.maximum(alt, 0.0) / 2.0)
+        err_rad = np.radians(frac * ephem.refraction_deg(alt, o.pressure_mbar, o.temp_c))
+        return (err_rad * np.exp(lnf) * pts.scale) ** 2
+
+    def _session_attitude(self, ref: RefFit, sub: CelestialPoints):
+        """Attitude-only fit of one session's points at the reference site, intrinsics held at the global fit.
+
+        Returns (angles (3,) deg [heading, pitch, roll], covariance (3, 3) deg^2, reduced chi2) or None.
+        The covariance comes from the Gauss-Newton normal matrix with the globally learned pixel sigma
+        and is inflated by the session's reduced chi2 when that exceeds 1 (a session with correlated
+        errors - flare, partial occlusion - must not look more precise than it is).  Points beyond
+        reject_k sigma of the session's own fit (flares) are dropped once and the fit repeated.
+
+        Why the intrinsics are fixed: refitting f per session lets a short arc (a cloudy day with 30 min
+        of sun) trade focal length against roll and pointing, which fakes 0.5-1.5 deg 'jumps' of a camera
+        that never moved.  A real bump changes the attitude, not the lens.
+        """
+        o = self.o
+        sub = sub.subset(np.ones(len(sub), bool))            # private copy
+        if len(sub) < 6:
+            return None
+        lay1 = Layout(1, fit_dt=False, fit_center=o.fit_center, fit_k1=o.fit_k1, fit_kr=False)
+        s = int(np.bincount(np.clip(sub.seg.astype(int), 0, ref.lay.S - 1)).argmax())
+        base = np.r_[ref.p[3 * s:3 * s + 3], ref.p[ref.lay.lnf:ref.lay.P]]
+        if len(base) != lay1.P:
+            return None
+        sub.seg = np.zeros(len(sub), int)
+        r, T = ephem.observer_frame(np.array([ref.lat0]), np.array([ref.lon0]), o.height_m)
+        q = base[None, :3].copy()
+        for rnd in range(2):
+            N = len(sub)
+            w = sub.scale * np.sqrt(sub.weight) / np.sqrt(self.sigma_px ** 2 + self._model_var(sub, base[3], r, T))
+
+            def fun(qq, sub=sub, w=w):
+                p = np.repeat(base[None], len(qq), 0)
+                p[:, :3] = qq
+                X, Y, front = self.predict(p, lay1, np.repeat(r, len(qq), 0), np.repeat(T, len(qq), 0), pts=sub)
+                return np.concatenate([np.where(front, (X - sub.X) * w, 1e3), np.where(front, (Y - sub.Y) * w, 1e3)], 1)
+
+            q, cost, res = batched_lm(fun, q, np.full(3, 1e-4), n_iter=30)
+            norm = np.hypot(res[0, :N], res[0, N:])
+            bad = norm > o.reject_k
+            if rnd == 1 or not bad.any() or bad.sum() > 0.4 * N or N - bad.sum() < 6:
+                break
+            sub = sub.subset(~bad)
+        h = 1e-4
+        r0 = fun(q)[0]
+        J = np.stack([(fun(q + h * np.eye(3)[k][None])[0] - r0) / h for k in range(3)], axis=1)
+        cov = np.linalg.pinv(J.T @ J)
+        red = float(cost[0]) / max(2 * len(sub) - 3, 1)
+        return q[0], cov * max(red, 1.0), red
+
+    def detect_jumps(self, ref: RefFit, moves=(), pts=None):
+        """Split into pose segments at known moves and at significant orientation changes between sessions.
+
+        Sessions = runs of points without gaps > session_gap_h.  Each session's attitude is fitted with
+        the intrinsics fixed (see _session_attitude) and compared with the previous fitted session: a new
+        pose segment starts only when the rotation exceeds ``jump_deg`` *and* its Mahalanobis distance
+        (both sessions' covariances) exceeds ``jump_chi2``.  Sessions too short to fit (< 6 points) join
+        the pose in force at their time.
+
+        pts: the points to segment; default *all* input points, including those the single-pose reference
+        fit rejected: after a bump seen only briefly (a short cloudy session) the bumped points look like
+        outliers to a one-pose fit and would otherwise vanish before the jump could be seen.  The returned
+        segment array refers to these points.
+        """
+        o = self.o
+        pts = self.pts_input if pts is None else pts
         order = np.argsort(pts.t)
         t = pts.t[order]
         session = np.concatenate([[0], np.cumsum(np.diff(t) > o.session_gap_h * 3600)])
@@ -472,32 +569,24 @@ class CelestialFitter:
         mv = sorted(float(m) for m in moves)
         seg = np.searchsorted(np.array(mv), pts.t, side="right") if mv else np.zeros(len(pts), int)
         jumps = [{"t": m, "why": "configured camera move"} for m in mv]
-        # per-session Earth-fixed orientation
-        Gs = []
-        for s in range(session.max() + 1):
-            m = sess == s
-            if m.sum() < 6:
-                Gs.append(None)
-                continue
-            sub = CelestialFitter(pts.subset(m), LevelReference(), self.o)
-            sub.S = 1
-            sub.pts.seg[:] = 0
-            p0 = np.r_[ref.p[:3], ref.p[ref.lay.lnf:]]
-            fit = sub.fit_reference(ref.lat0, ref.lon0, init=[p0], reject=False)
-            Gs.append((fit.G[0], float(pts.t[m].min()), m))
-        cur_G = None
+        cur = None
         extra = 0
         seg_auto = np.zeros(len(pts), int)
-        for item in Gs:
-            if item is None:
-                continue
-            G, t0, m = item
-            if cur_G is not None:
-                ang = float(rotation_angle_deg(G, cur_G))
-                if ang > o.jump_deg:
-                    extra += 1
-                    jumps.append({"t": t0, "why": f"orientation changed by {ang:.2f} deg"})
-            cur_G = G
+        for s in range(session.max() + 1):                 # sessions are numbered in time order
+            m = sess == s
+            fit = self._session_attitude(ref, pts.subset(m))
+            if fit is not None:
+                ang, cov, _ = fit
+                if cur is not None:
+                    d = ang - cur[0]
+                    d[0] = (d[0] + 180.0) % 360.0 - 180.0
+                    d2 = float(d @ np.linalg.pinv(cov + cur[1]) @ d)
+                    rot = float(rotation_angle_deg(rotation_matrix(*ang), rotation_matrix(*cur[0])))
+                    if rot > o.jump_deg and d2 > o.jump_chi2:
+                        extra += 1
+                        jumps.append({"t": float(pts.t[m].min()),
+                                      "why": f"orientation changed by {rot:.2f} deg (d2 {d2:.0f})"})
+                cur = (ang, cov)
             seg_auto[m] = extra
         seg = seg + seg_auto
         _, seg = np.unique(seg, return_inverse=True)
@@ -539,6 +628,13 @@ class CelestialFitter:
 
 
 # ============================================================================ grids / layers
+def _nanarg(a, fn=np.argmax):
+    """argmax/argmin ignoring non-finite cells (np.argmax returns the first NaN)."""
+    a = np.asarray(a, float)
+    fill = -np.inf if fn is np.argmax else np.inf
+    return int(fn(np.where(np.isfinite(a), a, fill)))
+
+
 def coarse_grid(domain=DOMAIN, dlat=0.1, dlon=0.2):
     lats = np.arange(domain[0], domain[1] + 1e-9, dlat)
     lons = np.arange(domain[2], domain[3] + 1e-9, dlon)
@@ -604,24 +700,27 @@ def solve_celestial(pts, level, opts, lats, lons, lat0, lon0, moves=(), init=Non
     """Full celestial pipeline on a coarse grid. Returns dict with ll (grid), ref, fitter, extras."""
     fitter = CelestialFitter(pts, level, opts)
     ref = fitter.fit_reference(lat0, lon0, init=init)
-    seg, jumps = fitter.detect_jumps(ref, moves)
+    seg, jumps = fitter.detect_jumps(ref, moves)               # over all input points: see detect_jumps
     if seg.max() > 0:
-        fitter.pts.seg = seg
+        allp = pts.subset(np.ones(len(pts), bool))
+        allp.seg = seg
+        fitter.pts = allp
         fitter._update_segments()
-        ref = fitter.fit_reference(lat0, lon0, reject=False)
+        ref = fitter.fit_reference(lat0, lon0)                  # per-pose fit, outliers judged per pose
     ref.jumps = jumps
     L, O = np.meshgrid(lats, lons, indexing="ij")
     chi2, P, chi2_data, lay = fitter.profile(ref, L.ravel(), O.ravel())
     # plumb-line outliers (branches, leaning trees): drop > 3.5 sigma at the best site and redo
-    if fitter.level.n_lines >= 4:
-        k = int(np.argmin(chi2))
+    if fitter.level.n_lines >= 4 and np.isfinite(chi2).any():
+        k = _nanarg(chi2, np.argmin)
         vr = fitter._vert_res(P[k:k + 1], lay)[0][:fitter.level.n_lines]
         bad = np.abs(vr) > 3.5
         if bad.any() and (~bad).sum() >= 3:
+            import dataclasses
             lev = fitter.level
-            fitter.level = LevelReference(lev.pitch, lev.roll, lev.heading, lev.segments[~bad], lev.seg_sigma[~bad],
-                                          lev.seg_t[~bad], lev.seg_pose[~bad], lev.source + f"; {int(bad.sum())} lines rejected",
-                                          lev.families)
+            fitter.level = dataclasses.replace(
+                lev, segments=lev.segments[~bad], seg_sigma=lev.seg_sigma[~bad], seg_t=lev.seg_t[~bad],
+                seg_pose=lev.seg_pose[~bad], source=lev.source + f"; {int(bad.sum())} lines rejected")
             chi2, P, chi2_data, lay = fitter.profile(ref, L.ravel(), O.ravel())
     ll = (-0.5 * chi2).reshape(L.shape)
     return {"ll": ll, "ref": ref, "fitter": fitter, "params": P.reshape(L.shape + (lay.P,)), "lay": lay,
@@ -647,7 +746,7 @@ def celestial_reliability(method, n, rms_px, level: LevelReference, n_days=1, n_
         r = 0.5 if n >= 5 else 0.35
     if jumps:
         r -= 0.1
-    if level.n_lines == 0 and "calibration" not in level.source and "config" not in level.source:
+    if level.n_terms == 0 and "calibration" not in level.source and "config" not in level.source:
         r *= 0.8
     return float(np.clip(r, 0.1, 0.9))
 
@@ -696,6 +795,8 @@ DEFAULTS = {
     "attitude": {"pitch_deg": 0.0, "pitch_sigma_deg": 15.0, "roll_deg": 0.0, "roll_sigma_deg": 3.0,
                  "heading_deg": None, "heading_sigma_deg": None},
     "vertical_sigma_deg": {"trunk": 1.5, "post": 0.5, "plumb": 0.15, "default": 1.5},
+    # floor on the *combined* level information of all lines of one kind (correlated errors, see _level)
+    "vertical_floor_deg": {"trunk": 0.5, "post": 0.25, "plumb": 0.05, "auto_lines": 1.0, "default": 0.5},
     "fit": {},
     "twilight": {"thresholds": [100.0, 50.0, 25.0, 12.0], "sigma_prior_min": 4.0, "sigma_floor_min": 1.0,
                  "asym_sigma_deg": 0.75, "ir_asym_sigma_deg": 1.5, "lookback_h": 40},
@@ -705,6 +806,46 @@ DEFAULTS = {
     "auto_verticals": True,             # daily Hough plumb-line candidates from an archived daylight frame
     "auto_vertical_sigma_deg": 2.5,
 }
+
+
+def _finite(*vals):
+    """True when every value is a finite number (JSON NaN / None / strings from a buggy analyzer are dropped)."""
+    try:
+        return all(v is not None and np.isfinite(float(v)) for v in vals)
+    except (TypeError, ValueError):
+        return False
+
+
+def _family_degenerate(segs, f, min_ratio=1e-3):
+    """True when the interpretation planes of a family of parallel edges (centred width units) are (nearly)
+    one plane: the vanishing direction is then only confined to a plane and the level residual is arbitrary
+    (e.g. two pieces of the same edge, or edges whose planes through the camera coincide).  Criterion: the
+    middle eigenvalue of sum n n^T must exceed min_ratio x the largest (~2 deg between the planes)."""
+    from .camera import pixel_rays
+    seg = np.asarray(segs, float)
+    d1 = pixel_rays(seg[:, 0], seg[:, 1], f, 0.0, 0.0)
+    d2 = pixel_rays(seg[:, 2], seg[:, 3], f, 0.0, 0.0)
+    n = np.cross(d1, d2)
+    nn = np.linalg.norm(n, axis=-1, keepdims=True)
+    if np.any(nn < 1e-9):
+        return True
+    ev = np.linalg.eigvalsh(np.einsum("ki,kj->ij", n / nn, n / nn))
+    return bool(ev[1] < min_ratio * ev[2])
+
+
+def _calibration_time(db, key, value):
+    """Unix time a calibration describes: value['ts'|'valid_at'] if given, else when the row was stored."""
+    for k in ("ts", "valid_at"):
+        if isinstance(value, dict) and value.get(k):
+            try:
+                return parse_iso(value[k]).timestamp() if isinstance(value[k], str) else float(value[k])
+            except Exception:
+                pass
+    try:
+        r = db.con.execute("SELECT updated FROM calibration WHERE key=?", (key,)).fetchone()
+        return parse_iso(r[0]).timestamp() if r and r[0] else None
+    except Exception:
+        return None
 
 
 def _merge(a, b):
@@ -739,6 +880,7 @@ class AstroBridge(Analyzer):
         self._worker = None
         self._star_cache = {}
         self._last_state = {}
+        self._reported = set()             # (method, jump half-hour) / mismatch keys already posted as events
 
     def available(self):
         return ephem.available()
@@ -769,20 +911,30 @@ class AstroBridge(Analyzer):
         return sizes.get(o.get("frame_id"), self.default_wh)
 
     def _level(self, db, pts_times=None):
+        """Level reference from config ``attitude``, DB calibration ``camera_attitude`` and camera_vertical rows.
+
+        camera_attitude = {pitch_deg, pitch_sigma_deg, roll_deg, roll_sigma_deg, heading_deg?, heading_sigma_deg?,
+        method, ts?}: ``ts`` (ISO or unix) is when the attitude was measured; without it the time the row was
+        stored is used.  It only matters after a camera bump (several pose segments): the priors then bind the
+        pose in force at that time.  Missing sigmas fall back to the config / weak defaults.
+        """
         a = self.cfg["attitude"]
         cal = db.calibration("camera_attitude") if db is not None else None
         src = "config level prior"
         if a == DEFAULTS["attitude"]:
             src = DEFAULTS_LEVEL_SOURCE
+        att_t = None
         if cal:
             a = _merge(a, cal)
             src = f"calibration camera_attitude ({cal.get('method', 'manual')})"
+            att_t = _calibration_time(db, "camera_attitude", cal)
         lev = LevelReference(
             pitch=(float(a["pitch_deg"]), float(a["pitch_sigma_deg"])) if a.get("pitch_sigma_deg") else None,
             roll=(float(a["roll_deg"]), float(a["roll_sigma_deg"])) if a.get("roll_sigma_deg") else None,
             heading=(float(a["heading_deg"]), float(a["heading_sigma_deg"])) if a.get("heading_sigma_deg") else None,
-            source=src)
-        segs, sig, ts = [], [], []
+            source=src, att_t=att_t)
+        segs, sig, ts, kinds = [], [], [], []
+        f_nom = 0.5 / np.tan(np.radians(float(self.camera_cfg.get("hfov_deg", 70.0))) / 2.0)
         if db is not None:
             cv = db.observations(kind="camera_vertical")
             auto = [o for o in cv if o["value"].get("kind") == "auto_lines"]
@@ -791,23 +943,48 @@ class AstroBridge(Analyzer):
             for o in cv:
                 v = o["value"]
                 for fam in v.get("horizontal_families", []) or []:
+                    fam = [q for q in fam if len(q) >= 4 and _finite(*q[:4])]
                     if len(fam) >= 2:
                         wv, hv = v.get("w", self.default_wh[0]), v.get("h", self.default_wh[1])
                         segs_f = np.array([[q[0] / wv - 0.5, (q[1] - 0.5 * hv) / wv, q[2] / wv - 0.5, (q[3] - 0.5 * hv) / wv]
                                            for q in fam])
+                        if _family_degenerate(segs_f, f_nom):
+                            log.warning("astro: horizontal family ignored - its edges lie (almost) in one plane through "
+                                        "the camera, so their common direction is undefined (%s)", fam)
+                            continue
                         lev.families.append((segs_f, np.radians(v.get("family_sigma_deg", 0.5)), o["ts"].timestamp()))
                 w, h = v.get("w", self.default_wh[0]), v.get("h", self.default_wh[1])
                 s_deg = v.get("sigma_deg") or self.cfg["vertical_sigma_deg"].get(v.get("kind", "default"),
                                                                                    self.cfg["vertical_sigma_deg"]["default"])
                 for sgm in v.get("segments", []):
+                    if len(sgm) < 4 or not np.all(np.isfinite(np.asarray(sgm, float))):
+                        continue
                     x1, y1, x2, y2 = sgm[:4]
+                    if np.hypot(x2 - x1, y2 - y1) < 1e-3 * w:
+                        continue
                     segs.append([x1 / w - 0.5, (y1 - 0.5 * h) / w, x2 / w - 0.5, (y2 - 0.5 * h) / w])
                     sig.append(np.radians(sgm[4] if len(sgm) > 4 else s_deg))
                     ts.append(o["ts"].timestamp())
+                    kinds.append(v.get("kind", "default"))
         if segs:
-            lev.segments, lev.seg_sigma, lev.seg_t = np.array(segs), np.array(sig), np.array(ts)
+            sig = np.array(sig)
+            kinds = np.array(kinds)
+            floors = self.cfg["vertical_floor_deg"]
+            capped = []
+            # Leans of trees in one stand (slope, prevailing wind), detector biases of automatic lines and
+            # uncorrected lens distortion are *correlated*: N lines do not beat that floor by sqrt(N).
+            for k in np.unique(kinds):
+                m = kinds == k
+                comb = 1.0 / np.sqrt(np.sum(1.0 / sig[m] ** 2))
+                floor = np.radians(floors.get(str(k), floors["default"]))
+                if comb < floor:
+                    sig[m] *= floor / comb
+                    capped.append(f"{k} {np.degrees(floor):.2f} deg")
+            lev.segments, lev.seg_sigma, lev.seg_t = np.array(segs), sig, np.array(ts)
             lev.seg_pose = np.zeros(len(segs), int)
             lev.source += f" + {len(segs)} plumb lines (camera_vertical)"
+            if capped:
+                lev.source += " (correlated-lean floor: " + ", ".join(capped) + ")"
         if lev.families:
             lev.source += f" + {len(lev.families)} level-line families"
         return lev
@@ -816,14 +993,15 @@ class AstroBridge(Analyzer):
         """Once per UTC day: Hough plumb-line candidates on the latest archived daylight frame."""
         if not self.cfg["auto_verticals"]:
             return []
-        day = datetime.now(UTC).date().isoformat()
-        if self._last_state.get("verticals_day") == day:
-            return []
-        self._last_state["verticals_day"] = day
         rows = ctx.db.con.execute("SELECT id, real_ts, path, w, h FROM frames WHERE path IS NOT NULL "
                                   "ORDER BY real_ts DESC LIMIT 300").fetchall()
         if not rows:
             return []
+        # stream (not wall-clock) day, so replays spanning several days also get one set per day
+        day = parse_iso(rows[0][1]).date().isoformat()
+        if self._last_state.get("verticals_day") == day:
+            return []
+        self._last_state["verticals_day"] = day
         la0, lo0 = self.cfg["approx_site"]
         t = [parse_iso(r[1]) for r in rows]
         _, alt = ephem.altaz_grid(ephem.body_places("sun", t), [la0], [lo0])
@@ -834,7 +1012,7 @@ class AstroBridge(Analyzer):
             fid, _, path, w, h = rows[k]
             try:
                 import cv2
-                img = cv2.imread(str(path))
+                img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)      # (imread's colour order is BGR)
             except Exception:
                 img = None
             if img is None:
@@ -862,7 +1040,7 @@ class AstroBridge(Analyzer):
     # ------------------------------------------------------------------ data collection (main thread)
     def _binned_points(self, db, kind, body, bin_s):
         """Median pixel per time bin (per resolution); the bin widens until <= max_points remain."""
-        obs = [o for o in db.observations(kind=kind) if "x" in o["value"] and "y" in o["value"]]
+        obs = [o for o in db.observations(kind=kind) if _finite(o["value"].get("x"), o["value"].get("y"))]
         if not obs:
             return None, 0, None
         sizes = self._frame_sizes(db, [o.get("frame_id") for o in obs])
@@ -892,11 +1070,14 @@ class AstroBridge(Analyzer):
         d = {"level": self._level(db), "opts": self._opts(ctx)}
         d["sun_track"], d["n_sun_track"], d["ts_sun_track"] = self._binned_points(db, "sun_pixel", "sun", self.cfg["sun_bin_s"])
         d["moon"], d["n_moon"], d["ts_moon"] = self._binned_points(db, "moon_pixel", "moon", self.cfg["moon_bin_s"])
-        stars = [o for o in db.observations(kind="star_field")
-                 if len(o["value"].get("points", [])) >= self.cfg["stars"]["min_points"]]
-        sizes = self._frame_sizes(db, [o.get("frame_id") for o in stars])
-        d["stars"] = [{"id": o["id"], "t": o["ts"], "points": o["value"]["points"], "wh": self._wh(o, sizes)}
-                      for o in stars]
+        stars = []
+        for o in db.observations(kind="star_field"):
+            pts = [q for q in (o["value"].get("points") or []) if len(q) >= 2 and _finite(*q[:3])]
+            if len(pts) >= self.cfg["stars"]["min_points"]:
+                stars.append((o, pts))
+        sizes = self._frame_sizes(db, [o.get("frame_id") for o, _ in stars])
+        d["stars"] = [{"id": o["id"], "t": o["ts"], "points": pts, "wh": self._wh(o, sizes)} for o, pts in stars]
+        stars = [o for o, _ in stars]
         d["n_stars"], d["ts_stars"] = len(stars), (max(o["ts"] for o in stars) if stars else None)
         mk = db.observations(kind="twilight_marker")
         d["twilight"] = [{"t": o["ts"], **o["value"]} for o in mk]
@@ -906,7 +1087,7 @@ class AstroBridge(Analyzer):
         d["shadow"] = []
         for o in sh:
             v = o["value"]
-            if "angle_deg_image" not in v:
+            if not _finite(v.get("angle_deg_image"), v.get("x", 0.0), v.get("y", 0.0)):
                 continue
             w, h = self._wh(o, sizes)
             d["shadow"].append({"t": o["ts"].timestamp(), "x": v.get("x", 0.5 * w) / w - 0.5,
@@ -935,7 +1116,8 @@ class AstroBridge(Analyzer):
         scene = db.observations(kind="scene_photometry", since=since)
         ir_by_frame = {o["frame_id"]: bool(o["value"].get("ir_mode")) for o in scene if o.get("frame_id") is not None}
         samples = [(o["ts"], o["value"].get("luma")) for o in sky
-                   if not ir_by_frame.get(o.get("frame_id"), False) and "sky" in str(o["value"].get("region") or "sky")]
+                   if not (o["value"].get("ir_mode") or ir_by_frame.get(o.get("frame_id"), False))
+                   and "sky" in str(o["value"].get("region") or "sky") and _finite(o["value"].get("luma"))]
         approx = tuple(self.cfg["approx_site"])
         thresholds = list(cfg["thresholds"])
         vals = [v for _, v in samples if v is not None]
@@ -943,13 +1125,18 @@ class AstroBridge(Analyzer):
             thresholds = [t / 255.0 for t in thresholds]
         markers = tw.extract_markers(samples, thresholds, approx=approx)
         markers += tw.ir_switch_markers([(o["ts"], o["value"].get("ir_mode")) for o in scene], approx=approx)
-        existing = db.observations(kind="twilight_marker", since=datetime.fromtimestamp(since.timestamp() - 3600, UTC))
+        existing = db.observations(kind="twilight_marker", since=datetime.fromtimestamp(since.timestamp() - 6 * 3600, UTC))
         out = []
         for m in markers:
-            if any(e["value"].get("series") == m["series"] and abs(e["ts"].timestamp() - m["t"]) < 180 for e in existing):
+            # one marker per series and twilight: the extraction is re-run every tick over a sliding look-back,
+            # so a later, different crossing of the same evening must not be added as a second measurement
+            if any(e["value"].get("series") == m["series"] and e["value"].get("event") == m["event"]
+                   and abs(e["ts"].timestamp() - m["t"]) < 4 * 3600 for e in existing):
                 continue
             val = {k: v for k, v in m.items() if k != "t"}
-            out.append(Observation("twilight_marker", datetime.fromtimestamp(m["t"], UTC), val, self.name, 0.6))
+            o = Observation("twilight_marker", datetime.fromtimestamp(m["t"], UTC), val, self.name, 0.6)
+            out.append(o)
+            existing.append({"ts": o.ts, "value": val})
         return out
 
     def _due(self, d):
@@ -1033,27 +1220,33 @@ class AstroBridge(Analyzer):
         la0, lo0 = self.cfg["approx_site"]
         sol = solve_celestial(pts, d["level"], d["opts"], lats, lons, la0, lo0, moves=d["moves"], init=init)
         ref, fitter = sol["ref"], sol["fitter"]
+        if not np.isfinite(sol["ll"]).any():
+            log.warning("astro: %s produced no finite likelihood (%d points); layer not written", method, len(pts))
+            return None
         summ = summarize(lats, lons, sol["ll"])
         n_days = len({int(t // 86400) for t in fitter.pts.t})
         rel = celestial_reliability(method, ref.n, ref.rms_px, fitter.level, n_days, ref.n_rejected, len(ref.jumps))
-        k = np.unravel_index(np.argmax(sol["ll"]), sol["ll"].shape)
+        k = np.unravel_index(_nanarg(sol["ll"]), sol["ll"].shape)
         pbest = sol["params"][k]
+        level_sigma = fitter.level.strength_deg()
         meta = {"name": f"astro_{method}", "reliability": rel, "independence_group": "astro_attitude",
                 "description": (f"{method}: {ref.n} points ({ref.n_rejected} rejected) over {n_days} day(s), fit rms "
-                                f"{ref.rms_px:.2f} px, sigma {ref.sigma_px:.2f} px; level reference: {fitter.level.source}. "
-                                f"Location information comes from the level reference (1 deg = 111 km along the "
-                                f"viewing azimuth / across it). {extra_desc}"),
+                                f"{ref.rms_px:.2f} px, sigma {ref.sigma_px:.2f} px; level reference: {fitter.level.source} "
+                                f"(zenith ~{level_sigma:.2f} deg). Location information comes from the level reference "
+                                f"(1 deg = 111 km along the viewing azimuth / across it). {extra_desc}"),
                 "sources": ["hordewatch observations (%s)" % method, "skyfield DE421 (skyfield-data)"],
                 "fix": summ, "camera_at_best": {"heading_deg": float(pbest[0]), "pitch_deg": float(pbest[1]),
                                                 "roll_deg": float(pbest[2]),
                                                 "f_px_at_1280": float(np.exp(pbest[sol['lay'].lnf]) * 1280)},
-                "pose_segments": int(fitter.S), "jumps": ref.jumps, "updated": datetime.now(UTC).isoformat()}
+                "pose_segments": int(fitter.S), "jumps": ref.jumps, "level_sigma_deg": level_sigma,
+                "updated": datetime.now(UTC).isoformat()}
         path = write_layer(self.layers_dir / f"astro_{method}.npz", lats, lons, sol["ll"], meta)
         fix = {"method": method, "lat": summ["lat"], "lon": summ["lon"], "sigma_km": summ["sigma_km"],
                "grid_path": str(path), **{k2: summ[k2] for k2 in ("lat_map", "lon_map", "sigma_major_km",
                                                                    "sigma_minor_km", "major_axis_bearing_deg",
                                                                    "info_bits")},
-               "reliability": rel, "n_points": ref.n, "rms_px": ref.rms_px, "level_reference": fitter.level.source}
+               "reliability": rel, "n_points": ref.n, "rms_px": ref.rms_px, "level_reference": fitter.level.source,
+               "level_sigma_deg": level_sigma}
         ts = ts or datetime.fromtimestamp(float(fitter.pts.t.max()), UTC)
         obs = [Observation("astro_fix", ts, fix, self.name, rel)]
         cal = {}
@@ -1063,15 +1256,24 @@ class AstroBridge(Analyzer):
                                    "updated": datetime.now(UTC).isoformat(), "last_t": float(fitter.pts.t.max())}
         events = [{"ts": ts, "summary": f"astro {method}: {summ['lat']:.2f}N {summ['lon']:.2f}E +-{summ['sigma_km']:.0f} km "
                                         f"(r={rel:.2f}, {summ['info_bits']:.1f} bits)", "value": fix}]
+        # human-facing alerts only for what is new: every recompute sees the same historic jumps again
         for j in ref.jumps:
+            key = (method, int(round(j["t"] / 1800.0)))
+            if key in self._reported:
+                continue
+            self._reported.add(key)
             events.append({"ts": datetime.fromtimestamp(j["t"], UTC), "summary": f"astro: camera pose jump ({j['why']})",
                            "value": j})
         other = d.get("camera_cal")
         if other and other.get("method") != method and method in ("sun_track", "stars") and other.get("G"):
-            ang = float(rotation_angle_deg(np.array(other["G"][-1]), ref.G[0]))
-            if ang > 0.5:
+            ang = float(rotation_angle_deg(np.array(other["G"][-1]), ref.G[-1]))   # latest pose of both
+            key = ("mismatch", method, other.get("method"))
+            if ang > 0.5 and key not in self._reported:
+                self._reported.add(key)
                 events.append({"ts": ts, "summary": f"astro: camera orientation from {method} differs from "
                                                     f"{other['method']} by {ang:.2f} deg (camera moved?)", "value": {"deg": ang}})
+            elif ang <= 0.5:
+                self._reported.discard(key)
         return {"observations": obs, "calibration": cal, "events": events}
 
     def _run_sun_track(self, d):
@@ -1114,8 +1316,12 @@ class AstroBridge(Analyzer):
         for s in chosen:
             w, h = s["wh"]
             aspect = h / w
+            # a failed identification is retried once a better approximate camera (astro_camera) exists
+            cam_key = (s["id"], (d.get("camera_cal") or {}).get("updated"))
             if s["id"] in self._star_cache:
                 fm = self._star_cache[s["id"]]
+            elif cam_key in self._star_cache:
+                fm = None
             else:
                 P = np.asarray(s["points"], float)
                 if P.shape[1] < 3:
@@ -1133,7 +1339,7 @@ class AstroBridge(Analyzer):
                     cam = self._approx_camera(d, aspect)
                     Pn = np.c_[P[:, 0] / w, P[:, 1] / w, P[:, 2]]
                     fm = st.match_frame(Pn, s["t"], cam, aspect=aspect, vmax=self.cfg["stars"]["vmax"])
-                self._star_cache[s["id"]] = fm
+                self._star_cache[s["id"] if fm is not None else cam_key] = fm
             if fm is None:
                 continue
             pts_list.append(CelestialPoints.from_places(fm.places, fm.X * w, fm.Y * w, w, h, "star"))

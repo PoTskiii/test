@@ -47,14 +47,28 @@ Marker extraction from photometry
 ---------------------------------
 ``extract_markers`` turns the per-frame ``sky_photometry`` luma series (and
 ``scene_photometry.ir_mode`` flags) into crossing times: 1-min medians, a
-5-min running median, then the *last* downward crossing of each threshold in
-the evening window that stays below it for 20 min (hysteresis) - and the first
-sustained upward crossing in the morning.  Crossings next to data gaps (> 3 min,
-stream outages) are rejected, since a reconnect after a gap would otherwise
-look like a crossing.
+5-min running median, then the downward crossing of each threshold in the
+evening window that stays below it for 20 min (hysteresis) and the sustained
+upward crossing in the morning.  Crossings next to data gaps (> 3 min, stream
+outages) are rejected, since a reconnect after a gap would otherwise look like a
+crossing.
+
+Two rules make the markers safe for a *live* monitor that re-runs the extraction
+every tick over a sliding look-back:
+* a window (dusk: sunset - 2 h .. + 3 h, dawn: sunrise - 3 h .. + 2 h at the
+  approximate site) is only decided once the data covers all of it - otherwise a
+  crossing picked from a half-seen evening could be followed by a second, different
+  one an hour later (moonrise, lit clouds, headlights on the sky ROI);
+* a window with more than one sustained crossing of the same threshold is
+  *ambiguous* and gives no marker.  Which one is "the" twilight crossing is then a
+  guess, and a wrong guess (a crossing at 15 deg depression) is worth far less than
+  a missing marker.
+The same logic applies to IR switches (camera flapping between modes under clouds),
+which must in addition go the right way (to IR while the Sun sinks).
 """
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -138,7 +152,7 @@ def twilight_loglik(markers, lats, lons, sigma_prior_min=4.0, sigma_floor_min=1.
     dt_sig = max(latency_sigma_s, 1.0) / 60.0
     # pass 1 with the prior noise scale -> learn the scatter at the best cell
     obj, p, r = _solve(h, hdot, ev, sid, S, sigma_prior_min, asym, dt_sig, h0_prior)
-    k = int(np.argmin(obj))
+    k = int(np.argmin(np.where(np.isfinite(obj), obj, np.inf)))
     n = len(t)
     dof = max(n - (2 * S + 1) * 0.5, 1.0)             # asymmetry / dt are prior-constrained: count half
     s2 = float(np.sum(r[k] ** 2) / dof)
@@ -146,7 +160,7 @@ def twilight_loglik(markers, lats, lons, sigma_prior_min=4.0, sigma_floor_min=1.
     sig = float(np.sqrt((dof * s2 + nu0 * sigma_prior_min ** 2) / (dof + nu0)))
     sig = max(sig, sigma_floor_min)
     obj, p, r = _solve(h, hdot, ev, sid, S, sig, asym, dt_sig, h0_prior)
-    k = int(np.argmin(obj))
+    k = int(np.argmin(np.where(np.isfinite(obj), obj, np.inf)))
     best = {"cell": k, "h0": {s: float(p[k, i]) for i, s in enumerate(names)},
             "asym": {s: float(p[k, S + i]) for i, s in enumerate(names)}, "dt_s": float(p[k, 2 * S] * 60.0),
             "rms_min": float(np.sqrt(np.mean(r[k] ** 2)))}
@@ -170,8 +184,13 @@ def _running_median(v, k=5):
     return np.median(np.lib.stride_tricks.sliding_window_view(vp, k), axis=1)
 
 
+@functools.lru_cache(maxsize=64)
 def _approx_sun_events(day, lat, lon):
-    """(sunset, sunrise-next-morning) unix times at the approximate site for a UTC date."""
+    """(sunset, sunrise-next-morning) unix times at the approximate site for a UTC date.
+
+    Memoised: the bridge re-extracts markers every tick over a 40-h look-back, and 2 x 576 IAU2000A
+    apparent places per day would otherwise cost ~0.15 s per day and tick in the main thread.
+    (Callers must not modify the returned arrays.)"""
     t0 = datetime(day.year, day.month, day.day, tzinfo=UTC).timestamp()
     ts = t0 + np.arange(0, 48 * 3600, 300.0)
     _, h = ephem.altaz_grid(ephem.body_places("sun", list(ts)), [lat], [lon])
@@ -182,11 +201,13 @@ def _approx_sun_events(day, lat, lon):
 
 
 def extract_markers(samples, thresholds, approx=(61.25, 9.0), hold_min=20.0, max_gap_min=3.0, series_prefix="sky_luma",
-                    min_points=30):
+                    min_points=30, require_complete=True):
     """Threshold crossings of a brightness series.
 
     samples: iterable of (datetime|unix, luma) - one per frame; non-positive luma ignored.
     thresholds: luma levels (same units as the samples).
+    require_complete: decide a twilight window only when the data reaches its end (see module docstring);
+    set False for a finished recording whose last window is cut short.
     Returns list of dicts {t, event, series, threshold, method, slope_per_min}.
     """
     data = [(s[0].timestamp() if isinstance(s[0], datetime) else float(s[0]), float(s[1])) for s in samples
@@ -210,16 +231,18 @@ def extract_markers(samples, thresholds, approx=(61.25, 9.0), hold_min=20.0, max
                 windows.append(("dawn", grid_t[i] - 3 * 3600, grid_t[i] + 2 * 3600))
                 break
         for event, w0, w1 in windows:
+            if require_complete and ts[-1] < w1:
+                continue                                   # window not fully seen yet: decide later
             sel = np.nonzero((ts >= w0) & (ts <= w1))[0]
             if len(sel) < 30:
                 continue
             for T in thresholds:
                 lt = np.log(T)
-                t_cross = _crossing(ts[sel], lv[sel], lt, event, hold_min, gaps[sel[:-1]] if len(sel) > 1 else None,
-                                    max_gap_min)
-                if t_cross is None:
-                    continue
-                tc, slope = t_cross
+                cands = _crossings(ts[sel], lv[sel], lt, event, hold_min, gaps[sel[:-1]] if len(sel) > 1 else None,
+                                   max_gap_min)
+                if len(cands) != 1:
+                    continue                               # none, or ambiguous (several sustained crossings)
+                tc, slope = cands[0]
                 if any(abs(tc - m["t"]) < 60 and m["series"] == f"{series_prefix}_{T:g}" for m in out):
                     continue
                 out.append({"t": tc, "event": event, "series": f"{series_prefix}_{T:g}", "threshold": float(T),
@@ -227,14 +250,14 @@ def extract_markers(samples, thresholds, approx=(61.25, 9.0), hold_min=20.0, max
     return out
 
 
-def _crossing(t, lv, lt, event, hold_min, gap_mask, max_gap_min):
-    """Sustained crossing of log-level lt; returns (time, dlog/dmin) or None."""
+def _crossings(t, lv, lt, event, hold_min, gap_mask, max_gap_min):
+    """All sustained crossings of log-level lt in the right direction: list of (time, dlog/dmin)."""
     below = lv < lt
     if event == "dusk":
-        cand = np.nonzero(~below[:-1] & below[1:])[0]
-        cand = cand[::-1]                                  # last sustained downward crossing
+        cand = np.nonzero(~below[:-1] & below[1:])[0]      # downward crossings
     else:
-        cand = np.nonzero(below[:-1] & ~below[1:])[0]      # first sustained upward crossing
+        cand = np.nonzero(below[:-1] & ~below[1:])[0]      # upward crossings
+    out = []
     for i in cand:
         after = (t > t[i + 1]) & (t <= t[i + 1] + hold_min * 60)
         before = (t < t[i]) & (t >= t[i] - 10 * 60)
@@ -251,19 +274,27 @@ def _crossing(t, lv, lt, event, hold_min, gap_mask, max_gap_min):
         f = (lt - lv[i]) / (lv[i + 1] - lv[i])
         tc = t[i] + f * (t[i + 1] - t[i])
         slope = (lv[i + 1] - lv[i]) / ((t[i + 1] - t[i]) / 60.0)
-        return float(tc), float(slope)
-    return None
+        out.append((float(tc), float(slope)))
+    return out
 
 
-def ir_switch_markers(samples, approx=(61.25, 9.0), stable_min=10.0):
-    """Day/night (IR) mode switches -> markers. samples: iterable of (datetime|unix, ir_mode bool)."""
+def ir_switch_markers(samples, approx=(61.25, 9.0), stable_min=10.0, settle_min=90.0, group_h=4.0):
+    """Day/night (IR) mode switches -> markers. samples: iterable of (datetime|unix, ir_mode bool).
+
+    A switch counts when the mode is stable for ``stable_min`` on both sides, the Sun at the approximate
+    site is between -15 and +8 deg *and moving the right way* (to IR while it sinks = dusk, to day while
+    it rises = dawn; a flap back to day mode in the evening is not a 'dawn'), and it is the only such
+    switch within ``group_h`` hours (a camera flapping at the threshold under clouds gives no marker).
+    Switches less than ``settle_min`` before the end of the data are left for a later call, when it is
+    known whether more switches follow.
+    """
     data = sorted((s[0].timestamp() if isinstance(s[0], datetime) else float(s[0]), bool(s[1])) for s in samples
                   if s[1] is not None)
     if len(data) < 10:
         return []
     t = np.array([d[0] for d in data])
     ir = np.array([d[1] for d in data])
-    out = []
+    cand = []
     for i in np.nonzero(ir[1:] != ir[:-1])[0]:
         pre = (t >= t[i] - stable_min * 60) & (t <= t[i])
         post = (t > t[i + 1] - 1e-6) & (t <= t[i + 1] + stable_min * 60)
@@ -271,11 +302,21 @@ def ir_switch_markers(samples, approx=(61.25, 9.0), stable_min=10.0):
             continue
         if t[i + 1] - t[i] > 180:
             continue
-        tc = 0.5 * (t[i] + t[i + 1])
-        event = "dusk" if ir[i + 1] else "dawn"
-        # sanity: must be in the right half of the day at the approximate site
-        _, h = ephem.altaz_grid(ephem.body_places("sun", [tc]), [approx[0]], [approx[1]])
-        if not (-15.0 < h[0, 0] < 8.0):
+        cand.append((0.5 * (t[i] + t[i + 1]), "dusk" if ir[i + 1] else "dawn"))
+    if not cand:
+        return []
+    tc = np.array([c[0] for c in cand])
+    _, h = ephem.altaz_grid(ephem.body_places("sun", list(tc)), [approx[0]], [approx[1]])
+    _, h2 = ephem.altaz_grid(ephem.body_places("sun", list(tc + 300.0)), [approx[0]], [approx[1]])
+    h, rising = h[0], (h2 - h)[0] > 0
+    ok = [(-15.0 < h[k] < 8.0) and (rising[k] == (cand[k][1] == "dawn")) for k in range(len(cand))]
+    out = []
+    for k, (tk, event) in enumerate(cand):
+        if not ok[k] or t[-1] - tk < settle_min * 60:
             continue
-        out.append({"t": float(tc), "event": event, "series": "ir_switch", "threshold": None, "method": "ir_mode"})
+        rivals = [j for j in range(len(cand)) if j != k and ok[j] and cand[j][1] == event
+                  and abs(cand[j][0] - tk) < group_h * 3600]
+        if rivals:
+            continue
+        out.append({"t": float(tk), "event": event, "series": "ir_switch", "threshold": None, "method": "ir_mode"})
     return out

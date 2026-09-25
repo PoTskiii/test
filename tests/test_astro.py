@@ -16,6 +16,17 @@ Accuracies achieved (and asserted) - see solver.py / camera.py for why:
   longitude sigma ~1.4 deg because a dusk/dawn asymmetry is allowed; latitude essentially unconstrained.
 * 40 catalogue stars at 2026-09-22 23:00 UTC + 5 spurious points: all identified, rms < 1 px;
   with a level calibration good to 0.1 deg the MAP is ~3 km from the truth (< 0.2 deg asserted).
+
+Adversarial review tests (bottom of the file) - none of them gives the solver the truth:
+* level bias +0.5 deg pitch / roll -> fix moves 58 km towards 218 deg / 53 km towards 307 deg (sign conventions);
+* a cloudy day (7 sun points) on a static camera is not a pose jump (was: 12/12 false jumps), a real 0.8 deg
+  bump seen in 8 points is, and a < 6-point session after a bump joins the bumped pose;
+* camera bumped 1 deg, calibration measured after the bump: 10 km (was: 59 km off with sigma 11 km);
+* live twilight extraction in 10-min ticks: one dusk marker per threshold (was: two, 17:13 and 19:39), none
+  for an ambiguous evening, no evening 'dawn' from a flapping IR switch;
+* sun track + 3 simulated hanging cords + 2 families of box edges (box tilted 0.15 deg), through the bridge:
+  8-14 km, sigma ~20 x 12 km; a NaN sun pixel no longer kills the layer; recomputes do not re-post alerts;
+* 60 automatic lines are capped at a combined 1.0 deg level reference (would claim 0.32 deg = 35 km).
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -504,3 +515,252 @@ def test_bridge_level_reference_and_auto_verticals(tmp_path):
     assert np.isclose(lev.seg_sigma[0], np.radians(0.2)) and np.isclose(lev.seg_sigma[-1], np.radians(2.5))
     assert len(lev.families) == 1 and "plumb lines" in lev.source and "families" in lev.source
     assert np.allclose(lev.segments[0], [0.0, (100 - 360) / 1280, 1 / 1280, (600 - 360) / 1280])
+
+
+# ============================================================================= adversarial review tests
+# (independent of the builder's own set-ups: nothing below hands the solver the truth it must recover)
+def _bumped_points(sun_obs, bumped, day_mask_fn, keep_fn=None, seed=4):
+    """Sun points where the camera had attitude `bumped` on the days selected by day_mask_fn."""
+    t, x, y = sun_obs
+    late = np.array([day_mask_fn(tt) for tt in t])
+    az, alt = sky_altaz("sun", [tt for tt, m in zip(t, late) if m])
+    xb, yb, ins = bumped.project_altaz(az, alt)
+    rng = np.random.default_rng(seed)
+    xb, yb = xb + rng.normal(0, 2, len(xb)), yb + rng.normal(0, 2, len(yb))
+    ts = [tt for tt, m in zip(t, late) if not m] + [tt for tt, m in zip(t, late) if m]
+    keep = np.r_[np.ones((~late).sum(), bool), ins]
+    if keep_fn is not None:
+        keep &= np.array([keep_fn(k, tt) for k, tt in enumerate(ts)])
+    xs, ys = np.r_[x[~late], xb][keep], np.r_[y[~late], yb][keep]
+    ts = [tt for tt, k in zip(ts, keep) if k]
+    return CelestialPoints.from_places(ephem.body_places("sun", ts), xs, ys, 1280, 720, "sun"), ts
+
+
+def test_level_bias_moves_fix_along_the_predicted_axis(sun_obs):
+    """Sign conventions end to end: a level reference that is wrong by +0.5 deg of *pitch* must move the fix
+    ~55 km towards the viewing azimuth (the sun looks higher -> closer to the sub-solar point), +0.5 deg of
+    *roll* (right side up) ~55 km towards the camera's right (azimuth 310).  Catches flipped azimuth/heading,
+    pixel-y or roll signs anywhere in camera.py / ephem.py / solver.py."""
+    lats, lons = np.arange(60.2, 62.4, 0.05), np.arange(8.6, 13.4, 0.1)
+    pts = sun_points(sun_obs)
+    got = {}
+    for name, lev in (("pitch", LevelReference(pitch=(2.5, 0.03), roll=(-1.0, 0.03), source="config")),
+                      ("roll", LevelReference(pitch=(2.0, 0.03), roll=(-0.5, 0.03), source="config"))):
+        s = summarize(lats, lons, solve_celestial(pts, lev, FitOptions(), lats, lons, 61.25, 9.0)["ll"])
+        got[name] = (float(haversine(LAT, LON, s["lat"], s["lon"])), float(bearing(LAT, LON, s["lat"], s["lon"])))
+    for name, az in (("pitch", 220.0), ("roll", 310.0)):
+        dist, brg = got[name]
+        assert 0.5 * 111 * 0.75 < dist < 0.5 * 111 * 1.25, (name, got)           # 1 deg = 111 km
+        assert abs((brg - az + 180) % 360 - 180) < 15, (name, got)
+
+
+def test_short_cloudy_session_is_not_a_camera_jump(sun_obs):
+    """A static camera with one cloudy day (35 min of sun) must stay ONE pose segment (the builder's per-session
+    refit with a free focal length split it in 12/12 seeds, 0.4-1.6 deg 'jumps').  Positive controls: a real
+    0.8 deg pitch bump seen only in a short session is still detected, and a session too short to fit
+    (< 6 points) after a bump joins the pose in force at its time, not the first one."""
+    from hordewatch.astro.solver import CelestialFitter
+    t, x, y = sun_obs
+    idx22 = [k for k, tt in enumerate(t) if tt.day == 22]
+    for seed in range(4):
+        rng = np.random.default_rng(seed)
+        s0 = int(rng.integers(0, len(idx22) - 7))
+        keep = np.array([tt.day != 22 for tt in t])
+        keep[idx22[s0:s0 + 7]] = True
+        sel = np.nonzero(keep)[0]
+        pts = CelestialPoints.from_places(ephem.body_places("sun", [t[i] for i in sel]), x[sel], y[sel], 1280, 720, "sun")
+        fitter = CelestialFitter(pts, LevelReference(), FitOptions())
+        seg, jumps = fitter.detect_jumps(fitter.fit_reference(61.25, 9.0))
+        assert seg.max() == 0 and jumps == [], (seed, jumps)
+    # real bump (pitch +0.8 deg) on 23 Sept, of which only 8 points are seen
+    day23 = [k for k, tt in enumerate(t) if tt.day == 23]
+    pts, ts = _bumped_points(sun_obs, CameraModel(220.0, 2.8, -1.0, 1000.0), lambda tt: tt.day == 23,
+                             keep_fn=lambda k, tt: tt.day != 23 or len(t) - len(day23) + 6 <= k < len(t) - len(day23) + 14)
+    assert sum(tt.day == 23 for tt in ts) == 8
+    fitter = CelestialFitter(pts, LevelReference(), FitOptions())
+    seg, jumps = fitter.detect_jumps(fitter.fit_reference(61.25, 9.0))
+    assert seg.max() == 1 and len(jumps) == 1
+    # bump on 22 Sept (full day), 23 Sept only 4 points with the bumped camera: they belong to segment 1
+    pts, ts = _bumped_points(sun_obs, CameraModel(220.0, 2.8, -1.0, 1000.0), lambda tt: tt.day >= 22,
+                             keep_fn=lambda k, tt: tt.day != 23 or k % 7 == 0)
+    n23 = sum(tt.day == 23 for tt in ts)
+    assert 2 <= n23 < 6
+    fitter = CelestialFitter(pts, LevelReference(), FitOptions())
+    seg, _ = fitter.detect_jumps(fitter.fit_reference(61.25, 9.0))
+    day = np.array([tt.day for tt in ts])
+    assert set(seg[day == 21]) == {0} and set(seg[day == 22]) == {1} and set(seg[day == 23]) == {1}
+
+
+def test_calibration_applies_only_to_its_pose_segment(sun_obs):
+    """Camera pitched up by 1 deg on 23 Sept; the level calibration (pitch 3.0) was measured on 23 Sept.
+    Applying it to the pre-bump pose too (builder's behaviour) biased the fix by ~55 km while claiming
+    sigma ~11 km; restricted to its own segment (att_t) the fix stays within 25 km."""
+    pts, _ = _bumped_points(sun_obs, CameraModel(220.0, 3.0, -1.0, 1000.0), lambda tt: tt.day == 23)
+    t_cal = datetime(2026, 9, 23, 15, tzinfo=UTC).timestamp()
+    lev = LevelReference(pitch=(3.0, 0.1), roll=(-1.0, 0.1), source="calibration camera_attitude (test)", att_t=t_cal)
+    sol = solve_celestial(pts, lev, FitOptions(), LATS, LONS, 61.25, 9.0)
+    assert sol["fitter"].S == 2
+    s = summarize(LATS, LONS, sol["ll"])
+    assert haversine(s["lat"], s["lon"], LAT, LON) < 25.0                        # achieved ~10 km
+    # the bridge takes att_t from the calibration row's time (or an explicit 'ts')
+    from hordewatch.db import DB
+    from hordewatch.astro.solver import _calibration_time
+    import tempfile
+    db = DB(tempfile.mkdtemp() + "/c.sqlite")
+    db.set_calibration("camera_attitude", {"pitch_deg": 3.0, "pitch_sigma_deg": 0.1, "ts": "2026-09-23T15:00:00+00:00"})
+    assert _calibration_time(db, "camera_attitude", db.calibration("camera_attitude")) == pytest.approx(t_cal)
+    assert AstroBridge({"auto_verticals": False})._level(db).att_t == pytest.approx(t_cal)
+
+
+def test_live_twilight_markers_one_per_evening_and_ambiguity(tmp_path):
+    """The bridge re-extracts markers every tick from a growing series.  (a) A clean evening fed in 20-min
+    ticks gives exactly ONE dusk marker per threshold, at the true crossing; (b) an evening where the sky ROI
+    brightens again (moonrise / lit cloud, 19:00-19:40 UTC) is ambiguous and gives none - the builder emitted
+    a first marker at 17:13 and a second one at 19:39 (15 deg depression); (c) an IR camera flapping at dusk
+    gives no marker and never an evening 'dawn'."""
+    from hordewatch.analyzers.base import Context
+    from hordewatch.db import DB
+    from hordewatch.types import StreamClock
+    from skyfield.api import wgs84
+
+    start = datetime(2026, 9, 21, 14, tzinfo=UTC)
+    times = [start + timedelta(minutes=k) for k in range(10 * 60)]
+    ts_, eph = ephem._skyfield()
+    h = (eph["earth"] + wgs84.latlon(LAT, LON, 0.0)).at(ts_.from_datetimes(times)).observe(eph["sun"]).apparent().altaz()[0].degrees
+    clean = np.clip(200 * 10 ** (0.35 * (h - 2.0)), 1.0, 230)
+    tt = np.array([t.timestamp() for t in times])
+    rebound = clean.copy()
+    rebound[(tt >= datetime(2026, 9, 21, 19, tzinfo=UTC).timestamp()) & (tt < datetime(2026, 9, 21, 19, 40, tzinfo=UTC).timestamp())] = 60.0
+
+    def run(luma, name):
+        db = DB(tmp_path / f"{name}.sqlite")
+        bridge = AstroBridge({"layers_dir": str(tmp_path / name), "threaded": False, "auto_verticals": False,
+                              "min_total": {"twilight": 99}, "twilight": {"thresholds": [40.0]}})
+        ctx = Context(db=db, config={}, clock=StreamClock())
+        got, i0 = [], 0
+        for stop in range(60, len(times) + 1, 20):                # live: 20 new minutes per tick
+            with db._lock:
+                db.con.executemany("INSERT INTO observations(ts, kind, analyzer, confidence, value) VALUES (?,?,?,?,?)",
+                                   [(times[k].isoformat(), "sky_photometry", "sky", 1.0,
+                                     json.dumps({"luma": float(luma[k]), "region": "sky"})) for k in range(i0, stop)])
+                db.con.commit()
+            i0 = stop
+            for o in bridge.on_tick(ctx):
+                db.add_observation(o)
+                got += [o] if o.kind == "twilight_marker" else []
+        return got
+
+    got = run(clean, "clean")
+    assert [(o.value["event"], o.value["series"]) for o in got] == [("dusk", "sky_luma_40")]
+    truth = [t for t, e in crossing_times(2.0 + np.log10(40 / 200) / 0.35, start=start, days=1) if e == "dusk"][0]
+    assert abs((got[0].ts - truth).total_seconds()) < 120
+    assert run(rebound, "rebound") == []
+    # (c) IR flapping at dusk on 21 Sept (on 17:40, off 17:55, on 18:10), clean switch to day at dawn 22 Sept
+    t_ir = [datetime(2026, 9, 21, 15, tzinfo=UTC) + timedelta(minutes=k) for k in range(17 * 60)]
+
+    def ir_at(t):
+        hm = t.hour * 60 + t.minute + (0 if t.day == 21 else 1440)
+        return (17 * 60 + 40 <= hm < 17 * 60 + 55) or (18 * 60 + 10 <= hm < 1440 + 4 * 60 + 30)
+    mk = tw.ir_switch_markers([(t, ir_at(t)) for t in t_ir], approx=(61.25, 9.0))
+    assert [m["event"] for m in mk] == ["dawn"]
+
+
+def test_bridge_with_measured_level_reference_and_bad_inputs(tmp_path, monkeypatch, sun_obs):
+    """End to end without any truth in the level reference: three hanging cords (plumb lines, 0.1 deg swing)
+    and the box's two families of level edges (box itself tilted 0.15 deg), all projected through the true
+    camera with 0.5 px noise, stored as a camera_vertical observation in pixels; plus a sun_pixel with
+    x = NaN from a buggy analyzer (the builder's median binning turned the whole layer into NaN).
+    Achieved: 8-14 km from the truth with sigma ~20 x 12 km; asserted < 30 km and truth inside 3 sigma."""
+    from hordejakt.grid import GRID
+    from hordejakt.layers import live
+    from hordewatch.analyzers.base import Context
+    from hordewatch.db import DB
+    from hordewatch.types import Observation, StreamClock
+
+    rng = np.random.default_rng(0)
+
+    def unit(az):
+        return np.array([np.sin(np.radians(az)), np.cos(np.radians(az)), 0.0])
+
+    def seg_px(p, q):
+        (x1, y1, _), (x2, y2, _) = CAM.project_enu(p), CAM.project_enu(q)
+        return [float(v) for v in np.r_[x1, y1, x2, y2] + rng.normal(0, 0.5, 4)]
+
+    cords = []
+    for az0, dist in ((205, 3.0), (228, 4.5), (241, 6.0)):
+        top = unit(az0) * dist + [0, 0, 1.2]
+        lean, la = np.radians(rng.normal(0, 0.1)), rng.uniform(0, 2 * np.pi)
+        cords.append(seg_px(top, top + 1.5 * np.array([np.sin(lean) * np.sin(la), np.sin(lean) * np.cos(la), -np.cos(lean)])))
+    k_ax, th = unit(rng.uniform(0, 360)), np.radians(0.15)
+
+    def tilted(v):                                   # Rodrigues rotation: the box is not perfectly level
+        return v * np.cos(th) + np.cross(k_ax, v) * np.sin(th) + k_ax * (k_ax @ v) * (1 - np.cos(th))
+    c = unit(221) * 5.0 + [0, 0, -0.8]
+    fams = []
+    for edge_az, half, off_az, off in ((20, 1.0, 110, 0.6), (110, 0.6, 20, 1.0)):
+        fam = []
+        for hgt in (0.0, 1.1):
+            for side in (-1, 1):
+                mid = c + tilted(unit(off_az) * side * off + [0, 0, hgt])
+                fam.append(seg_px(mid - tilted(unit(edge_az)) * half, mid + tilted(unit(edge_az)) * half))
+        fams.append(fam)
+
+    db = DB(tmp_path / "hw.sqlite")
+    t, x, y = sun_obs
+    for tt, xx, yy in zip(t, x, y):
+        db.add_observation(Observation("sun_pixel", tt, {"x": xx, "y": yy, "w": 1280, "h": 720}, "sun"))
+    db.add_observation(Observation("sun_pixel", t[5] + timedelta(seconds=20),
+                                   {"x": float("nan"), "y": 300.0, "w": 1280, "h": 720}, "sun"))
+    db.add_observation(Observation("camera_vertical", datetime(2026, 9, 22, 10, tzinfo=UTC),
+                                   {"segments": cords, "kind": "plumb", "w": 1280, "h": 720,
+                                    "horizontal_families": fams, "family_sigma_deg": 0.2}, "human"))
+    bridge = AstroBridge({"layers_dir": str(tmp_path / "layers"), "domain": [59.3, 63.3, 7.0, 14.0],
+                          "coarse_dlat": 0.1, "coarse_dlon": 0.2, "threaded": False, "auto_verticals": False})
+    out = bridge.on_tick(Context(db=db, config={}, clock=StreamClock()))
+    (fix,) = [o.value for o in out if o.kind == "astro_fix"]
+    assert fix["n_points"] == len(t) and np.isfinite([fix["lat"], fix["lon"], fix["sigma_km"]]).all()
+    err = haversine(fix["lat"], fix["lon"], LAT, LON)
+    assert err < 30.0 and err < 3 * fix["sigma_major_km"]
+    assert "3 plumb lines" in fix["level_reference"] and "2 level-line families" in fix["level_reference"]
+    assert 0.1 < fix["level_sigma_deg"] < 0.3
+    monkeypatch.setattr(live, "LIVE_DIR", tmp_path / "layers")
+    (L,) = live.build(GRID, {})
+    i, j = GRID.index(LAT, LON)
+    assert L.name == "astro_sun_track" and L.loglik.shape == GRID.shape and np.isfinite(L.loglik[i, j])
+    assert np.nanmax(L.loglik) - L.loglik[i, j] < 6.0                             # truth well inside the layer
+    # recomputing with the same data must not re-post events (jumps / mismatches are reported once)
+    n_ev = db.con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    bridge._done_counts.clear()
+    bridge.on_tick(Context(db=db, config={}, clock=StreamClock()))
+    assert db.con.execute("SELECT COUNT(*) FROM events WHERE summary LIKE '%jump%'").fetchone()[0] == 0
+    assert db.con.execute("SELECT COUNT(*) FROM events").fetchone()[0] == n_ev + 1   # only the new fix summary
+
+
+def test_correlated_lean_floor_for_line_sets(tmp_path):
+    """60 automatic Hough lines at 2.5 deg each would claim a 0.32 deg (35 km) level reference; tree leans and
+    detector/distortion biases are correlated, so the combined information per kind is floored
+    (auto_lines 1.0 deg, trunk 0.5 deg).  Few precise plumb lines are untouched."""
+    from hordewatch.db import DB
+    from hordewatch.types import Observation
+
+    db = DB(tmp_path / "hw.sqlite")
+    t0 = datetime(2026, 9, 22, 10, tzinfo=UTC)
+    rng = np.random.default_rng(1)
+    auto = [[x, 50.0, x + 3, 650.0] for x in rng.uniform(20, 1260, 60)]
+    trunks = [[x, 100.0, x + 2, 600.0] for x in rng.uniform(20, 1260, 30)]
+    db.add_observation(Observation("camera_vertical", t0, {"segments": auto, "kind": "auto_lines", "sigma_deg": 2.5,
+                                                           "w": 1280, "h": 720}, "astro_bridge"))
+    db.add_observation(Observation("camera_vertical", t0, {"segments": trunks, "kind": "trunk", "w": 1280, "h": 720}, "human"))
+    db.add_observation(Observation("camera_vertical", t0, {"segments": [[600, 100, 600.5, 500], [700, 80, 700.4, 400]],
+                                                           "kind": "plumb", "w": 1280, "h": 720}, "human"))
+    # two pieces of the same straight edge: no defined vanishing direction -> the family is ignored
+    db.add_observation(Observation("camera_vertical", t0, {"segments": [], "kind": "post", "w": 1280, "h": 720,
+                                                           "horizontal_families": [[[400, 500, 600, 490], [650, 487.5, 850, 477.5]]],
+                                                           "family_sigma_deg": 0.1}, "human"))
+    lev = AstroBridge({"auto_verticals": False})._level(db)
+    assert lev.n_lines == 92 and lev.families == []
+    comb = lambda s: float(np.degrees(1.0 / np.sqrt(np.sum(1.0 / s ** 2))))
+    assert comb(lev.seg_sigma[:30]) == pytest.approx(0.5, abs=1e-6)                 # trunks (manual first)
+    assert comb(lev.seg_sigma[30:32]) == pytest.approx(0.15 / np.sqrt(2), rel=1e-6)   # plumb: unchanged
+    assert comb(lev.seg_sigma[32:]) == pytest.approx(1.0, abs=1e-6)                 # automatic lines
+    assert "correlated-lean floor" in lev.source

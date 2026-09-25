@@ -1,0 +1,1589 @@
+@@@@ c0c849b 09-23 14:30 Scaffold Hordejakten map app with drive-time data
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+new file mode 100644
+index 0000000..7786897
+--- /dev/null
++++ b/src/data/lag.ts
+@@ -0,0 +1,210 @@
++// Kartlagene: navn, farger og forklaring. Fargene brukes både på kartet og i tegnforklaringen.
++
++export type LagId =
++  | 'modell'
++  | 'kjoretid'
++  | 'retning'
++  | 'skydekke'
++  | 'skyanalyse'
++  | 'defaultno'
++  | 'steder'
++  | 'teorier'
++  | 'fly'
++  | 'felt'
++  | 'utenfor'
++
++export type Merkelapp = 'fakta' | 'beregnet' | 'tolkning' | 'teori'
++
++export type Tegn = {
++  stil: 'fyll' | 'linje' | 'stiplet' | 'ring' | 'prikk' | 'rute'
++  farge: string
++  tekst: string
++}
++
++export type Lag = {
++  id: LagId
++  navn: string
++  kort: string
++  merkelapp: Merkelapp
++  forklaring: string
++  tegn: Tegn[]
++  kilde: string
++}
++
++export const FARGE = {
++  modell: ['#9f1239', '#f43f5e', '#fb923c', '#fde68a'],
++  kjoretid: ['#ccfbf1', '#99f6e4', '#5eead4', '#2dd4bf', '#0d9488', '#115e59'],
++  langtFraVei: '#94a3b8',
++  retning: '#7c3aed',
++  skydekke: '#64748b',
++  skyanalyse: '#2563eb',
++  defaultno: '#111827',
++  steder: '#e5007e',
++  tidligere: '#64748b',
++  teorier: '#d97706',
++  fly: '#0284c7',
++  felt: '#16a34a',
++  utenfor: '#0f172a',
++}
++
++export const KJORETID_KLASSER = [
++  { fra: 4, til: 5 },
++  { fra: 5, til: 6 },
++  { fra: 6, til: 7 },
++  { fra: 7, til: 8 },
++  { fra: 8, til: 9 },
++  { fra: 9, til: 11 },
++]
++
++export const MERKELAPP: Record<Merkelapp, { tekst: string; klasse: string }> = {
++  fakta: { tekst: 'Fakta', klasse: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
++  beregnet: { tekst: 'Beregnet', klasse: 'bg-sky-50 text-sky-700 ring-sky-200' },
++  tolkning: { tekst: 'Tolkning', klasse: 'bg-amber-50 text-amber-800 ring-amber-200' },
++  teori: { tekst: 'Teori', klasse: 'bg-violet-50 text-violet-700 ring-violet-200' },
++}
++
++export const LAG: Lag[] = [
++  {
++    id: 'modell',
++    navn: 'Sannsynlighetskart',
++    kort: 'Alle hint vektet sammen',
++    merkelapp: 'beregnet',
++    forklaring:
++      'Hver rute (ca. 11 × 11 km) får en poengsum ut fra hintene du slår på i modellen under. Jo mørkere rødfarge, jo bedre passer ruta med hintene. Du bestemmer selv hvor mye hvert hint skal telle.',
++    tegn: [
++      { stil: 'fyll', farge: FARGE.modell[0], tekst: 'Topp 2 % av rutene' },
++      { stil: 'fyll', farge: FARGE.modell[1], tekst: 'Topp 2–5 %' },
++      { stil: 'fyll', farge: FARGE.modell[2], tekst: 'Topp 5–10 %' },
++      { stil: 'fyll', farge: FARGE.modell[3], tekst: 'Topp 10–25 %' },
++    ],
++    kilde: 'Egen modell. Kjøretider fra OSRM (OpenStreetMap).',
++  },
++  {
++    id: 'kjoretid',
++    navn: 'Kjøretid fra Oslo',
++    kort: 'Hvor langt kommer man på ~7 t?',
++    merkelapp: 'beregnet',
++    forklaring:
++      'Faktisk kjøretid med bil fra Oslo sentrum til hver rute, beregnet langs veinettet. Grå ruter ligger mer enn 3 km fra nærmeste bilvei. OSRM regner ofte litt tregere enn Google, så se på tallene som ±30 min.',
++    tegn: [
++      { stil: 'fyll', farge: FARGE.kjoretid[0], tekst: '4–5 t' },
++      { stil: 'fyll', farge: FARGE.kjoretid[1], tekst: '5–6 t' },
++      { stil: 'fyll', farge: FARGE.kjoretid[2], tekst: '6–7 t' },
++      { stil: 'fyll', farge: FARGE.kjoretid[3], tekst: '7–8 t' },
++      { stil: 'fyll', farge: FARGE.kjoretid[4], tekst: '8–9 t' },
++      { stil: 'fyll', farge: FARGE.kjoretid[5], tekst: 'Over 9 t' },
++      { stil: 'fyll', farge: FARGE.langtFraVei, tekst: 'Over 3 km fra bilvei' },
++    ],
++    kilde: 'OSRM (router.project-osrm.org), beregnet 23.09.',
++  },
++  {
++    id: 'retning',
++    navn: '118° / 298° fra Oslo',
++    kort: 'Linja fra «ØST CA 118»',
++    merkelapp: 'teori',
++    forklaring:
++      'Hvis «118° øst» er retningen fra kassen mot Oslo, ligger kassen et sted på den heltrukne linja nordvest for Oslo (298°). Det skraverte feltet viser ±5° usikkerhet. Den stiplede delen mot sørøst (118°) er med for fullstendighet, men er under 2 t fra Oslo. Mest sannsynlig gjelder tallet bare retningen fra kassen til parkeringen.',
++    tegn: [
++      { stil: 'linje', farge: FARGE.retning, tekst: '298° (nordvest) fra Oslo' },
++      { stil: 'stiplet', farge: FARGE.retning, tekst: '118° (sørøst) fra Oslo' },
++      { stil: 'rute', farge: FARGE.retning, tekst: '±5° usikkerhet' },
++    ],
++    kilde: 'Tavla («ØST CA 118»).',
++  },
++  {
++    id: 'skydekke',
++    navn: 'Skydekke',
++    kort: 'Hun så klar himmel, her var det skyet',
++    merkelapp: 'tolkning',
++    forklaring:
++      'Grovt tegnet ut fra Windy-skykartet. Anja skrev «KLAR HIMMEL» samme kveld, så områder med tett skydekke er mindre sannsynlige. Tidspunktet for skjermbildet er ukjent.',
++    tegn: [{ stil: 'rute', farge: FARGE.skydekke, tekst: 'Tett skydekke (mindre sannsynlig)' }],
++    kilde: 'Windy.com (ECMWF), skjermbilde fra fellesskapet.',
++  },
++  {
++    id: 'skyanalyse',
++    navn: 'Skyanalyse (Agder)',
++    kort: 'Fellesskapets sky- og flykart',
++    merkelapp: 'teori',
++    forklaring:
++      'Et kart laget ut fra når Anja sa det var skyet og når fly gikk over. Soner for kl. 12, 15–17 og 19–20 overlapper i indre Agder. Den fylte sirkelen er «møtepunktet» og den ytre ringen usikkerheten. Kjøretiden hit er bare ca. 4 t.',
++    tegn: [
++      { stil: 'fyll', farge: FARGE.skyanalyse, tekst: 'Møtepunkt' },
++      { stil: 'ring', farge: FARGE.skyanalyse, tekst: 'Usikkerhet (ca. 45 km)' },
++    ],
++    kilde: 'Delt bilde fra fellesskapet. Plassert omtrentlig.',
++  },
++  {
++    id: 'defaultno',
++    navn: 'Kandidater fra default.no',
++    kort: 'Toppruter i deres fusjonsmodell',
++    merkelapp: 'beregnet',
++    forklaring:
++      'De fem beste rutene i default.no sin modell (fly, vær, satellitt, fuglelyd, skog). Ringen er 10 km. Merk at flere ligger bare ca. 3,5 t fra Oslo.',
++    tegn: [
++      { stil: 'prikk', farge: FARGE.defaultno, tekst: 'Kandidat (nummer = rangering)' },
++      { stil: 'ring', farge: FARGE.defaultno, tekst: '10 km-radius' },
++    ],
++    kilde: 'default.no, 22.09 kl. 12:41.',
++  },
++  {
++    id: 'steder',
++    navn: 'Steder fra hint',
++    kort: 'Horde AS, Bjørneparken, Prøysen …',
++    merkelapp: 'fakta',
++    forklaring:
++      'Steder som hintene peker på. Rosa punkter er fra hint, det hvite er startpunktet i Oslo, og grå ruter er der kassen ble funnet i 2023 og 2024.',
++    tegn: [
++      { stil: 'prikk', farge: FARGE.steder, tekst: 'Sted fra hint' },
++      { stil: 'prikk', farge: '#ffffff', tekst: 'Start (Oslo)' },
++      { stil: 'rute', farge: FARGE.tidligere, tekst: 'Tidligere funnsted' },
++    ],
++    kilde: 'Hint-listen.',
++  },
++  {
++    id: 'teorier',
++    navn: 'Teorier fra fellesskapet',
++    kort: 'Froland, Lillehammer …',
++    merkelapp: 'teori',
++    forklaring: 'Ubekreftede teorier som går rundt. Overstreket betyr at et annet hint taler imot.',
++    tegn: [{ stil: 'prikk', farge: FARGE.teorier, tekst: 'Teori (ubekreftet)' }],
++    kilde: 'Praktiskinfo.no, Discord og TikTok.',
++  },
++  {
++    id: 'fly',
++    navn: 'Flyet kl. 21:30',
++    kort: 'Oslo–Bodø, sett og hørt',
++    merkelapp: 'tolkning',
++    forklaring:
++      'Ruten Oslo lufthavn–Bodø. NOZ56U var i stigning og passerte ca. 21:29 ekte tid. Den tykke biten er et grovt anslag på hvor flyet var da, 100–200 km fra Gardermoen.',
++    tegn: [
++      { stil: 'stiplet', farge: FARGE.fly, tekst: 'Flyrute Oslo–Bodø' },
++      { stil: 'linje', farge: FARGE.fly, tekst: 'Omtrent her kl. 21:29 (anslag)' },
++    ],
++    kilde: 'ADS-B via default.no, 45 sek forsinkelse.',
++  },
++  {
++    id: 'felt',
++    navn: 'Søkesektor fra parkering',
++    kort: 'For deg som leter i felt',
++    merkelapp: 'tolkning',
++    forklaring:
++      'Plasser markøren på en parkering eller skogsbilvei. Sektoren viser hvor kassen bør ligge hvis parkeringen er 118° fra kassen: mot 298° (±20°), 300–900 m unna, oppover. Dra markøren for å flytte den.',
++    tegn: [
++      { stil: 'rute', farge: FARGE.felt, tekst: 'Søkesektor (300–900 m)' },
++      { stil: 'prikk', farge: FARGE.felt, tekst: 'Parkering (dra meg)' },
++    ],
++    kilde: 'Tavla («ØST CA 118», 5–10 min gange).',
++  },
++  {
++    id: 'utenfor',
++    navn: 'Utenfor Norge',
++    kort: 'Kassen står i Norge',
++    merkelapp: 'fakta',
++    forklaring: 'Ifølge vilkårene står kassen et sted i Norge. Alt utenfor er skyggelagt.',
++    tegn: [{ stil: 'fyll', farge: FARGE.utenfor, tekst: 'Utenfor Norge' }],
++    kilde: 'Vilkårene til Hordejakten.',
++  },
++]
++
++export const LAG_ETTER_ID = Object.fromEntries(LAG.map((l) => [l.id, l])) as Record<LagId, Lag>
+@@@@ ecf0260 09-23 14:42 Build map UI with panels, model controls and flight tracks
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 7786897..acdf362 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -143 +143 @@ export const LAG: Lag[] = [
+-      'De fem beste rutene i default.no sin modell (fly, vær, satellitt, fuglelyd, skog). Ringen er 10 km. Merk at flere ligger bare ca. 3,5 t fra Oslo.',
++      'De fem beste rutene i default.no sin modell (fly, vær, satellitt, fuglelyd, skog). Ringen er 10 km. Merk at nr. 1 bare er ca. 3,5 t fra Oslo, mens Anja tror hun sov ca. 7 t.',
+@@ -148 +148 @@ export const LAG: Lag[] = [
+-    kilde: 'default.no, 22.09 kl. 12:41.',
++    kilde: 'default.no, 22.09 kl. 16:42.',
+@@ -175,2 +175,2 @@ export const LAG: Lag[] = [
+-    navn: 'Flyet kl. 21:30',
+-    kort: 'Oslo–Bodø, sett og hørt',
++    navn: 'Fly i lufta kl. 21:29',
++    kort: 'Anja pekte rett opp og skrev «FLY»',
+@@ -179 +179 @@ export const LAG: Lag[] = [
+-      'Ruten Oslo lufthavn–Bodø. NOZ56U var i stigning og passerte ca. 21:29 ekte tid. Den tykke biten er et grovt anslag på hvor flyet var da, 100–200 km fra Gardermoen.',
++      'Sporene til alle 49 fly som var i lufta 21:28–21:34 (ekte tid). Prikkene viser hvor hvert fly var da Anja pekte opp. Kassen bør ligge nær et spor. Det tykke sporet er NOZ56U (Oslo–Bodø), beste treff hos default.no, og ringen er 10 km rundt der det var. Svake spor er fly under 3000 fot.',
+@@ -181,2 +181,3 @@ export const LAG: Lag[] = [
+-      { stil: 'stiplet', farge: FARGE.fly, tekst: 'Flyrute Oslo–Bodø' },
+-      { stil: 'linje', farge: FARGE.fly, tekst: 'Omtrent her kl. 21:29 (anslag)' },
++      { stil: 'linje', farge: FARGE.fly, tekst: 'Flyspor 21:28–21:34' },
++      { stil: 'prikk', farge: FARGE.fly, tekst: 'Posisjon da hun pekte opp' },
++      { stil: 'ring', farge: FARGE.fly, tekst: 'NOZ56U, 10 km' },
+@@ -184 +185 @@ export const LAG: Lag[] = [
+-    kilde: 'ADS-B via default.no, 45 sek forsinkelse.',
++    kilde: 'ADS-B fra adsb.lol (via default.no). Streamen er 45 sek forsinket.',
+@@@@ f99df64 09-23 14:43 Add Norheimsund letters theory and README
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index acdf362..1ede977 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -167 +167 @@ export const LAG: Lag[] = [
+-    kort: 'Froland, Lillehammer …',
++    kort: 'Norheimsund, Froland, Lillehammer …',
+@@@@ 520fd05 09-23 14:49 Add theory ranking with percentages, Innlandet and Windy exclusions
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 1ede977..d76f672 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -4,0 +5,2 @@ export type LagId =
++  | 'teoriomrader'
++  | 'innlandet'
+@@ -39 +41,2 @@ export const FARGE = {
+-  skydekke: '#64748b',
++  skydekke: '#2563eb',
++  innlandet: '#e11d48',
+@@ -81,0 +85,21 @@ export const LAG: Lag[] = [
++  {
++    id: 'teoriomrader',
++    navn: 'Teoriene',
++    kort: 'Områdene med sannsynlighet i prosent',
++    merkelapp: 'beregnet',
++    forklaring:
++      'Hver sirkel er en teori om hvor kassen står. Prosenten er regnet ut fra hintene du har slått på i Teorier-fanen. Større tall og tykkere kant betyr mer sannsynlig.',
++    tegn: [
++      { stil: 'ring', farge: '#e11d48', tekst: 'Teori-område med prosent' },
++    ],
++    kilde: 'Teorier-fanen.',
++  },
++  {
++    id: 'innlandet',
++    navn: 'Innlandet fylke',
++    kort: 'Der fellesskapet leter nå',
++    merkelapp: 'tolkning',
++    forklaring: 'Grensen for Innlandet fylke. Fellesskapet er nå sikre på at kassen står her. Velg «Innlandet» i modellen for å vekte det.',
++    tegn: [{ stil: 'rute', farge: FARGE.innlandet, tekst: 'Innlandet fylke' }],
++    kilde: 'Fylkesgrenser fra Kartverket (forenklet).',
++  },
+@@ -88 +112 @@ export const LAG: Lag[] = [
+-      'Faktisk kjøretid med bil fra Oslo sentrum til hver rute, beregnet langs veinettet. Grå ruter ligger mer enn 3 km fra nærmeste bilvei. OSRM regner ofte litt tregere enn Google, så se på tallene som ±30 min.',
++      'Faktisk kjøretid med bil fra Oslo sentrum til hver rute, beregnet langs veinettet. Grå ruter ligger mer enn 3 km fra nærmeste bilvei. OSRM regner ofte litt tregere enn Google, så se på tallene som ±30 min. Anja sov og vet ikke hvor lenge de kjørte, så bruk laget som en pekepinn.',
+@@ -116,2 +140,2 @@ export const LAG: Lag[] = [
+-    navn: 'Skydekke',
+-    kort: 'Hun så klar himmel, her var det skyet',
++    navn: 'Blått på Windy (utelukket)',
++    kort: 'Hun så klar himmel, her var det skyer',
+@@ -120,3 +144,3 @@ export const LAG: Lag[] = [
+-      'Grovt tegnet ut fra Windy-skykartet. Anja skrev «KLAR HIMMEL» samme kveld, så områder med tett skydekke er mindre sannsynlige. Tidspunktet for skjermbildet er ukjent.',
+-    tegn: [{ stil: 'rute', farge: FARGE.skydekke, tekst: 'Tett skydekke (mindre sannsynlig)' }],
+-    kilde: 'Windy.com (ECMWF), skjermbilde fra fellesskapet.',
++      'Områdene som var blå på Windy-kartet samme periode som Anja skrev «KLAR HIMMEL». De er utelukket i sannsynlighetskartet. Tegnet for hånd fra skjermbildet, så kantene er omtrentlige (±10 km). Båndet fra Lillehammer mot Sverige er mest usikkert.',
++    tegn: [{ stil: 'rute', farge: FARGE.skydekke, tekst: 'Blått på Windy = utelukket' }],
++    kilde: 'Windy.com, skjermbilde fra fellesskapet.',
+@@@@ 52c0b78 09-23 15:02 Add sunny-today areas, Solør theory and fake-light doubt
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index d76f672..1540e4b 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -9,0 +10 @@ export type LagId =
++  | 'solidag'
+@@ -41,0 +43 @@ export const FARGE = {
++  solidag: '#eab308',
+@@ -147,0 +150,10 @@ export const LAG: Lag[] = [
++  {
++    id: 'solidag',
++    navn: 'Sol i dag (satellitt)',
++    kort: 'Klart her, skyet nesten alle andre steder',
++    merkelapp: 'tolkning',
++    forklaring:
++      'Områdene som var klare på satellittbildet 23.09 mens Anja hadde sol. Tegnet grovt ut fra en beskrivelse (Kongsvinger–Rena mot Sverige, deler av Vestfold, Trondheim–Ålesund), ikke fra selve bildet. Stiplet kant betyr usikker.',
++    tegn: [{ stil: 'rute', farge: FARGE.solidag, tekst: 'Klart på satellitt 23.09' }],
++    kilde: 'Satellittbilde, beskrevet av fellesskapet.',
++  },
+@@@@ cf75140 09-23 15:05 Add codes and beliefs summary with links, and Bergen 118° line
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 1540e4b..722561e 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -128,2 +128,2 @@ export const LAG: Lag[] = [
+-    navn: '118° / 298° fra Oslo',
+-    kort: 'Linja fra «ØST CA 118»',
++    navn: 'Retningslinjer (118°)',
++    kort: 'Fra Oslo og fra Horde i Bergen',
+@@ -132 +132 @@ export const LAG: Lag[] = [
+-      'Hvis «118° øst» er retningen fra kassen mot Oslo, ligger kassen et sted på den heltrukne linja nordvest for Oslo (298°). Det skraverte feltet viser ±5° usikkerhet. Den stiplede delen mot sørøst (118°) er med for fullstendighet, men er under 2 t fra Oslo. Mest sannsynlig gjelder tallet bare retningen fra kassen til parkeringen.',
++      'Hvis «118° øst» er retningen fra kassen mot Oslo, ligger kassen et sted på den heltrukne linja nordvest for Oslo (298°). Det skraverte feltet viser ±5° usikkerhet. Den stiplede delen mot sørøst (118°) er med for fullstendighet, men er under 2 t fra Oslo. Mest sannsynlig gjelder tallet bare retningen fra kassen til parkeringen. Den turkise linja er 118° fra Horde AS i Bergen (5008), gjennom Telemark.',
+@@ -136,0 +137 @@ export const LAG: Lag[] = [
++      { stil: 'linje', farge: '#0891b2', tekst: '118° fra Horde AS i Bergen' },
+@@@@ f3eb2bb 09-23 15:13 Make the panels easier to understand
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 722561e..8d54717 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -248,0 +249,9 @@ export const LAG_ETTER_ID = Object.fromEntries(LAG.map((l) => [l.id, l])) as Rec
++
++/** Lagene gruppert slik de vises i Kart-fanen */
++export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
++  { navn: 'Hovedkart', forklaring: 'Hvor kassen mest sannsynlig står.', ider: ['modell', 'teoriomrader'] },
++  { navn: 'Vær', forklaring: 'Anja har hatt klar himmel og sol. Her var det ikke det.', ider: ['skydekke', 'solidag'] },
++  { navn: 'Fly, retning og kjøretid', forklaring: 'Flyet hun pekte på, 118°-linjene og hvor langt man kommer fra Oslo.', ider: ['fly', 'retning', 'kjoretid'] },
++  { navn: 'Steder og teorier', forklaring: 'Stedene hintene og folk i chatten peker på.', ider: ['teorier', 'steder', 'defaultno', 'innlandet', 'skyanalyse'] },
++  { navn: 'Annet', forklaring: 'Verktøy og bakgrunn.', ider: ['felt', 'utenfor'] },
++]
+@@@@ bdffb03 09-23 15:15 Mark 118° as the sign direction, confirmed by Anja
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 8d54717..125a6ee 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -139 +139 @@ export const LAG: Lag[] = [
+-    kilde: 'Tavla («ØST CA 118»).',
++    kilde: 'Tavla («ØST CA 118 · RETNING SKILT»).',
+@@ -230 +230 @@ export const LAG: Lag[] = [
+-      'Plasser markøren på en parkering eller skogsbilvei. Sektoren viser hvor kassen bør ligge hvis parkeringen er 118° fra kassen: mot 298° (±20°), 300–900 m unna, oppover. Dra markøren for å flytte den.',
++      'Plasser markøren på en parkering eller skogsbilvei. Skiltet ved kassen peker 118°. Hvis det peker mot veien inn, ligger kassen mot 298° (±20°) fra bilen, 300–900 m unna, oppover. Dra markøren for å flytte den.',
+@@ -235 +235 @@ export const LAG: Lag[] = [
+-    kilde: 'Tavla («ØST CA 118», 5–10 min gange).',
++    kilde: 'Tavla («ØST CA 118 · RETNING SKILT», 5–10 min gange).',
+@@@@ e94d4db 09-23 15:18 Exclude the Odal–Jessheim morning fog area
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 125a6ee..1ac61f8 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -143 +143 @@ export const LAG: Lag[] = [
+-    navn: 'Blått på Windy (utelukket)',
++    navn: 'Skyer og tåke (utelukket)',
+@@ -148 +148,4 @@ export const LAG: Lag[] = [
+-    tegn: [{ stil: 'rute', farge: FARGE.skydekke, tekst: 'Blått på Windy = utelukket' }],
++    tegn: [
++      { stil: 'rute', farge: FARGE.skydekke, tekst: 'Blått på Windy = utelukket' },
++      { stil: 'rute', farge: '#64748b', tekst: 'Tåke i morges 23.09 (Odal–Jessheim)' },
++    ],
+@@@@ 86d52b8 09-23 15:22 Add "Alt vi har" mode, sun clues, new sign geometry and cabins
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 1ac61f8..5235daa 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -16,0 +17 @@ export type LagId =
++  | 'hytter'
+@@ -51,0 +53 @@ export const FARGE = {
++  hytter: '#92400e',
+@@ -137,0 +140 @@ export const LAG: Lag[] = [
++      { stil: 'stiplet', farge: '#0891b2', tekst: 'Samme linje korrigert for misvisning (ca. 123°)' },
+@@ -233 +236 @@ export const LAG: Lag[] = [
+-      'Plasser markøren på en parkering eller skogsbilvei. Skiltet ved kassen peker 118°. Hvis det peker mot veien inn, ligger kassen mot 298° (±20°) fra bilen, 300–900 m unna, oppover. Dra markøren for å flytte den.',
++      'Plasser markøren på en parkering eller skogsbilvei. Skiltet står vest-nordvest for kassen og peker 118–120° mot den. Kommer du fra bilen, ligger kassen altså mot ca. 120° (±20°), 300–900 m unna, oppover. Dra markøren for å flytte den.',
+@@ -239,0 +243,12 @@ export const LAG: Lag[] = [
++  {
++    id: 'hytter',
++    navn: 'Utleide hytter (Tretopphyttene)',
++    kort: 'Kan teamet bo her?',
++    merkelapp: 'teori',
++    forklaring: 'De 8 hyttene til Tretopphyttene i Ringsaker. Mørk nål = opptatt hele jakten (Bjørkhytta). Lys nål = delvis opptatt 23.–27.09. Ikke bekreftet at de har noe med jakten å gjøre.',
++    tegn: [
++      { stil: 'prikk', farge: FARGE.hytter, tekst: 'Opptatt hele perioden' },
++      { stil: 'prikk', farge: '#d6a57a', tekst: 'Delvis opptatt' },
++    ],
++    kilde: 'tretopphytter.no, bookingkalender 23.09.',
++  },
+@@ -258 +273 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Steder og teorier', forklaring: 'Stedene hintene og folk i chatten peker på.', ider: ['teorier', 'steder', 'defaultno', 'innlandet', 'skyanalyse'] },
++  { navn: 'Steder og teorier', forklaring: 'Stedene hintene og folk i chatten peker på.', ider: ['teorier', 'hytter', 'steder', 'defaultno', 'innlandet', 'skyanalyse'] },
+@@@@ 66e31ce 09-23 15:39 Separate confirmed facts from guesses and fix review findings
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 5235daa..00b6f49 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -80 +80 @@ export const LAG: Lag[] = [
+-      'Hver rute (ca. 11 × 11 km) får en poengsum ut fra hintene du slår på i modellen under. Jo mørkere rødfarge, jo bedre passer ruta med hintene. Du bestemmer selv hvor mye hvert hint skal telle.',
++      'Hver rute (ca. 11 × 11 km) får en poengsum ut fra fokuset du har valgt i Kart-fanen. Fargen viser hvor godt ruta passer sammenlignet med den beste ruta. Er mange ruter like gode, får de samme farge. Ruter uten farge passer dårlig eller er utelukket.',
+@@ -82,4 +82,4 @@ export const LAG: Lag[] = [
+-      { stil: 'fyll', farge: FARGE.modell[0], tekst: 'Topp 2 % av rutene' },
+-      { stil: 'fyll', farge: FARGE.modell[1], tekst: 'Topp 2–5 %' },
+-      { stil: 'fyll', farge: FARGE.modell[2], tekst: 'Topp 5–10 %' },
+-      { stil: 'fyll', farge: FARGE.modell[3], tekst: 'Topp 10–25 %' },
++      { stil: 'fyll', farge: FARGE.modell[0], tekst: 'Passer svært godt (over 90 % av beste)' },
++      { stil: 'fyll', farge: FARGE.modell[1], tekst: 'Passer godt (60–90 %)' },
++      { stil: 'fyll', farge: FARGE.modell[2], tekst: 'Passer middels (35–60 %)' },
++      { stil: 'fyll', farge: FARGE.modell[3], tekst: 'Passer litt (15–35 %)' },
+@@@@ e72a665 09-23 15:41 Add second plane NOZ9EG and the Ringsaker track
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 00b6f49..a198d00 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -222 +222 @@ export const LAG: Lag[] = [
+-      'Sporene til alle 49 fly som var i lufta 21:28–21:34 (ekte tid). Prikkene viser hvor hvert fly var da Anja pekte opp. Kassen bør ligge nær et spor. Det tykke sporet er NOZ56U (Oslo–Bodø), beste treff hos default.no, og ringen er 10 km rundt der det var. Svake spor er fly under 3000 fot.',
++      'Sporene til alle 49 fly som var i lufta 21:28–21:34 (ekte tid). Prikkene viser hvor hvert fly var da Anja pekte opp. Kassen bør ligge nær et spor. De to tykke sporene er flyene nærmest: NOZ56U nordover over Løten og NOZ9EG sørover over Ringsakfjellet. Ringene er 10 km rundt der de var. Svake spor er fly under 3000 fot.',
+@@ -226 +226 @@ export const LAG: Lag[] = [
+-      { stil: 'ring', farge: FARGE.fly, tekst: 'NOZ56U, 10 km' },
++      { stil: 'ring', farge: FARGE.fly, tekst: 'NOZ56U og NOZ9EG, 10 km' },
+@@@@ ce85e10 09-23 15:51 Mark Tretopphyttene and Prøysenstua as checked
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index a198d00..0e7b468 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -248 +248 @@ export const LAG: Lag[] = [
+-    forklaring: 'De 8 hyttene til Tretopphyttene i Ringsaker. Mørk nål = opptatt hele jakten (Bjørkhytta). Lys nål = delvis opptatt 23.–27.09. Ikke bekreftet at de har noe med jakten å gjøre.',
++    forklaring: 'De 8 hyttene til Tretopphyttene i Ringsaker. Mørk nål = opptatt hele jakten (Bjørkhytta). Lys nål = delvis opptatt 23.–27.09. Alle er sjekket av en i chatten, uten funn.',
+@@@@ fe51e10 09-23 15:55 Add clues from default.no we were missing
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 0e7b468..843daf0 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -189,0 +190 @@ export const LAG: Lag[] = [
++      { stil: 'ring', farge: FARGE.defaultno, tekst: 'Terrengtreff (vei, furu, relieff)' },
+@@@@ 41304dc 09-23 19:04 Show every place-linked hint on the map, and add Kodejakten game hints
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 843daf0..36191e0 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -4,0 +5 @@ export type LagId =
++  | 'hintmarkorer'
+@@ -88,0 +90,14 @@ export const LAG: Lag[] = [
++  {
++    id: 'hintmarkorer',
++    navn: 'Hint på kartet',
++    kort: 'Alle hint og tips som peker på et sted',
++    merkelapp: 'fakta',
++    forklaring:
++      'En markør for hvert hint, tips og det folk sier som handler om et bestemt sted. Oransje = hint, lilla = det folk sier, rød kant = siste nytt. Tallet viser hvor mange ting som hører til stedet. Trykk på markøren for å lese, og «Les hele hintet» for å åpne hintkortet. Hint som ikke handler om et sted (for eksempel tallene på genseren) har ingen markør.',
++    tegn: [
++      { stil: 'prikk', farge: '#ea580c', tekst: 'Hint' },
++      { stil: 'prikk', farge: '#7c3aed', tekst: 'Det folk sier' },
++      { stil: 'ring', farge: '#e5007e', tekst: 'Siste nytt' },
++    ],
++    kilde: 'Hint-fanen og «Hva folk tror».',
++  },
+@@ -271 +286 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Hovedkart', forklaring: 'Hvor kassen mest sannsynlig står.', ider: ['modell', 'teoriomrader'] },
++  { navn: 'Hovedkart', forklaring: 'Hvor kassen mest sannsynlig står, og hvor hintene peker.', ider: ['hintmarkorer', 'modell', 'teoriomrader'] },
+@@@@ 6763e06 09-23 19:08 Add community exclusion map (no mushrooms, mountain birch) and powerbank codes
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 36191e0..8c55841 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -10,0 +11 @@ export type LagId =
++  | 'utelukket'
+@@ -171,0 +173,14 @@ export const LAG: Lag[] = [
++  {
++    id: 'utelukket',
++    navn: 'Utelukket av fellesskapet',
++    kort: 'Ingen sopp, fjellbjørk og annet',
++    merkelapp: 'tolkning',
++    forklaring:
++      'Kartet fellesskapet har laget 23.09. Rødt er utelukket, rosa er utelukket fordi det ikke er sopp der, og lyseblått fordi det vokser fjellbjørk der. Det som står igjen er stripa Hamar–Løten–Rena–Koppang og Ringsakfjellet/Rudshøgda. Stedfestet fra et bilde, så kantene er omtrentlige (±10 km).',
++    tegn: [
++      { stil: 'fyll', farge: '#dc2626', tekst: 'Utelukket' },
++      { stil: 'fyll', farge: '#d946ef', tekst: 'Ingen sopp' },
++      { stil: 'fyll', farge: '#22d3ee', tekst: 'Fjellbjørk' },
++    ],
++    kilde: 'Delt i chatten 23.09.',
++  },
+@@ -287 +302 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Vær', forklaring: 'Anja har hatt klar himmel og sol. Her var det ikke det.', ider: ['skydekke', 'solidag'] },
++  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser sopp og vanlig skog. Her passer det ikke.', ider: ['utelukket', 'skydekke', 'solidag'] },
+@@@@ b55eafc 09-23 19:13 Remove the pink "no mushrooms" exclusion, which was not correct
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 8c55841..674e79b 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -176 +176 @@ export const LAG: Lag[] = [
+-    kort: 'Ingen sopp, fjellbjørk og annet',
++    kort: 'Fjellbjørk og annet',
+@@ -179 +179 @@ export const LAG: Lag[] = [
+-      'Kartet fellesskapet har laget 23.09. Rødt er utelukket, rosa er utelukket fordi det ikke er sopp der, og lyseblått fordi det vokser fjellbjørk der. Det som står igjen er stripa Hamar–Løten–Rena–Koppang og Ringsakfjellet/Rudshøgda. Stedfestet fra et bilde, så kantene er omtrentlige (±10 km).',
++      'Kartet fellesskapet har laget 23.09. Rødt er utelukket, og lyseblått er utelukket fordi det vokser fjellbjørk der. Det som står igjen er stripa Hamar–Løten–Rena–Koppang, Ringsakfjellet/Rudshøgda og Gjøvik/Toten. Stedfestet fra et bilde, så kantene er omtrentlige (±10 km).',
+@@ -182 +181,0 @@ export const LAG: Lag[] = [
+-      { stil: 'fyll', farge: '#d946ef', tekst: 'Ingen sopp' },
+@@ -302 +301 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser sopp og vanlig skog. Her passer det ikke.', ider: ['utelukket', 'skydekke', 'solidag'] },
++  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser vanlig skog. Her passer det ikke.', ider: ['utelukket', 'skydekke', 'solidag'] },
+@@@@ 405c497 09-23 19:15 Switch pink to red, and add "Skiltet er borte" whiteboard (19:12)
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 674e79b..2feb9b4 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -41 +41 @@ export const FARGE = {
+-  modell: ['#9f1239', '#f43f5e', '#fb923c', '#fde68a'],
++  modell: ['#991b1b', '#ef4444', '#fb923c', '#fde68a'],
+@@ -47 +47 @@ export const FARGE = {
+-  innlandet: '#e11d48',
++  innlandet: '#dc2626',
+@@ -50 +50 @@ export const FARGE = {
+-  steder: '#e5007e',
++  steder: '#dc2626',
+@@ -101 +101 @@ export const LAG: Lag[] = [
+-      { stil: 'ring', farge: '#e5007e', tekst: 'Siste nytt' },
++      { stil: 'ring', farge: '#dc2626', tekst: 'Siste nytt' },
+@@ -113 +113 @@ export const LAG: Lag[] = [
+-      { stil: 'ring', farge: '#e11d48', tekst: 'Teori-område med prosent' },
++      { stil: 'ring', farge: '#ef4444', tekst: 'Teori-område med prosent' },
+@@@@ 05d8624 09-23 19:16 Make the excluded area read as red rather than pale pink
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 2feb9b4..a84f493 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -181 +181 @@ export const LAG: Lag[] = [
+-      { stil: 'fyll', farge: '#dc2626', tekst: 'Utelukket' },
++      { stil: 'fyll', farge: '#b91c1c', tekst: 'Utelukket' },
+@@@@ 1971621 09-23 19:22 Add Analyse tab with audio, birds, plane sounds and municipality ratings
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index a84f493..3d18a4d 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -11,0 +12 @@ export type LagId =
++  | 'kommuner'
+@@ -185,0 +187,14 @@ export const LAG: Lag[] = [
++  {
++    id: 'kommuner',
++    navn: 'Kommunevurdering (Vercel)',
++    kort: 'Usikkert, lite sannsynlig, utelukket',
++    merkelapp: 'tolkning',
++    forklaring:
++      'Hver kommune vurdert av administratoren på hordejakten.vercel.app, et uavhengig fanprosjekt. Grønt = usikkert (fortsatt åpent), grått = lite sannsynlig, rødt = utelukket. Ingen kommune er satt til «sannsynlig» ennå. Hentet 23.09.',
++    tegn: [
++      { stil: 'fyll', farge: '#4d9b73', tekst: 'Usikkert (åpent)' },
++      { stil: 'fyll', farge: '#64748b', tekst: 'Lite sannsynlig' },
++      { stil: 'fyll', farge: '#b91c1c', tekst: 'Utelukket' },
++    ],
++    kilde: 'hordejakten.vercel.app (kreditt til dem).',
++  },
+@@ -301 +316 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser vanlig skog. Her passer det ikke.', ider: ['utelukket', 'skydekke', 'solidag'] },
++  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser vanlig skog. Her passer det ikke.', ider: ['utelukket', 'kommuner', 'skydekke', 'solidag'] },
+@@@@ fb2ac52 09-23 19:45 Tidy the wide layout, mark the edge of the exclusion map, and stop Analyse hanging
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 3d18a4d..e22ddf1 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -180 +180 @@ export const LAG: Lag[] = [
+-      'Kartet fellesskapet har laget 23.09. Rødt er utelukket, og lyseblått er utelukket fordi det vokser fjellbjørk der. Det som står igjen er stripa Hamar–Løten–Rena–Koppang, Ringsakfjellet/Rudshøgda og Gjøvik/Toten. Stedfestet fra et bilde, så kantene er omtrentlige (±10 km).',
++      'Kartet fellesskapet har laget 23.09. Rødt er utelukket, og lyseblått er utelukket fordi det vokser fjellbjørk der. Det som står igjen er stripa Hamar–Løten–Rena–Koppang, Ringsakfjellet/Rudshøgda og Gjøvik/Toten. Stedfestet fra et bilde, så kantene er omtrentlige (±10 km). Bildet dekket bare Østlandet: den rette, stiplede kanten i vest er der bildet slutter. Vest for den er ikke vurdert av fellesskapet, men er uansett langt unna de andre hintene.',
+@@@@ fc71636 09-23 20:03 Mark everything west of the community exclusion map as excluded
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index e22ddf1..c27e7ec 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -180 +180 @@ export const LAG: Lag[] = [
+-      'Kartet fellesskapet har laget 23.09. Rødt er utelukket, og lyseblått er utelukket fordi det vokser fjellbjørk der. Det som står igjen er stripa Hamar–Løten–Rena–Koppang, Ringsakfjellet/Rudshøgda og Gjøvik/Toten. Stedfestet fra et bilde, så kantene er omtrentlige (±10 km). Bildet dekket bare Østlandet: den rette, stiplede kanten i vest er der bildet slutter. Vest for den er ikke vurdert av fellesskapet, men er uansett langt unna de andre hintene.',
++      'Kartet fellesskapet har laget 23.09. Rødt er utelukket, og lyseblått er utelukket fordi det vokser fjellbjørk der. Det som står igjen er stripa Hamar–Løten–Rena–Koppang, Ringsakfjellet/Rudshøgda og Gjøvik/Toten. Stedfestet fra et bilde, så kantene er omtrentlige (±10 km). Bildet dekket bare Østlandet, så alt vest for det (Vestlandet og vestre Agder) er fylt inn som utelukket her.',
+@@@@ b03c6a9 09-24 18:32 Add Horde's «codes are in the app» reply, +5 code variants, the «Ingen pizza enda» whiteboard and the community 800–900 moh map layer
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index c27e7ec..15f882f 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -11,0 +12,2 @@ export type LagId =
++  | 'hoyde891'
++  | 'fellesskap891'
+@@ -173,0 +176,24 @@ export const LAG: Lag[] = [
++  {
++    id: 'hoyde891',
++    navn: '810–891 moh nær vei',
++    kort: '2,7 eiffeltårn, høyst 900 m fra vei',
++    merkelapp: 'beregnet',
++    forklaring:
++      'Horde AI svarer «2,7 eiffeltårn stablet oppå hverandre» på HORDEMINUS. Eiffeltårnet er 300 m uten antenne og 330 m med, så det blir 810 eller 891 m (875 m med 324 m, høyden fra 2000 til 2022). Rutene viser skog og mark mellom 790 og 911 moh som ligger høyst 900 m fra en bilvei eller skogsbilvei, så man rekker å bære kassen dit på 5–10 min. Høyde fra Kartverket (1 m-modell) i et rutenett på ca. 500 m, veier fra OpenStreetMap.',
++    tegn: [
++      { stil: 'rute', farge: '#6d28d9', tekst: 'Ca. 810 moh (790–830)' },
++      { stil: 'rute', farge: '#a78bfa', tekst: '830–860 moh' },
++      { stil: 'rute', farge: '#1d4ed8', tekst: 'Ca. 875–891 moh (860–911)' },
++    ],
++    kilde: 'Kartverket høydedata og OpenStreetMap. Tallet fra Horde AI i appen 24.09.',
++  },
++  {
++    id: 'fellesskap891',
++    navn: 'Fellesskapets 800–900 moh-kart',
++    kort: 'Høyde + fly + skog, utenfor skytefelt',
++    merkelapp: 'tolkning',
++    forklaring:
++      'Kartet noen i fellesskapet laget 24.09: 800–900 moh, der flyene Anja så passer over, med skog og utenfor skytefelt. Det meste ligger vest for Rena, mellom Rena og Evenstad/Koppang. Stedfestet fra bildet, ca. ±500 m.',
++    tegn: [{ stil: 'fyll', farge: '#e11d1d', tekst: 'Passer med høyde, fly og skog' }],
++    kilde: 'Delt i chatten 24.09.',
++  },
+@@ -315,0 +342 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
++  { navn: 'Høyden (2,7 eiffeltårn)', forklaring: '810 eller 891 moh, nær vei.', ider: ['hoyde891', 'fellesskap891'] },
+@@@@ 4e65b1c 09-24 18:35 Add 5 whiteboards; «kom fra den veien ←» flips the parking search sector to ~300°
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 15f882f..c3a260c 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -307 +307 @@ export const LAG: Lag[] = [
+-      'Plasser markøren på en parkering eller skogsbilvei. Skiltet står vest-nordvest for kassen og peker 118–120° mot den. Kommer du fra bilen, ligger kassen altså mot ca. 120° (±20°), 300–900 m unna, oppover. Dra markøren for å flytte den.',
++      'Plasser markøren på en parkering eller skogsbilvei. Anja skrev «KOM FRA DEN VEIEN» med pil mot venstre i bildet, som er ca. 130° (sørøst) fra kassen. Skiltet pekte samme vei (118–120°). Fra bilen ligger kassen altså mot ca. 300° (±25°, nordvest), 300–900 m unna, oppover og uten sti. Dra markøren for å flytte den.',
+@@ -312 +312 @@ export const LAG: Lag[] = [
+-    kilde: 'Tavla («ØST CA 118 · RETNING SKILT», 5–10 min gange).',
++    kilde: 'Tavla («KOM FRA DEN VEIEN ←», «ØST CA 118 · RETNING SKILT», 5–10 min gange).',
+@@@@ 679260b 09-24 18:38 Add Kroktjennet/Hemmeldalen 891 moh lead and the SE-road flag in the height layer
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index c3a260c..5ffba6f 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -182 +182 @@ export const LAG: Lag[] = [
+-      'Horde AI svarer «2,7 eiffeltårn stablet oppå hverandre» på HORDEMINUS. Eiffeltårnet er 300 m uten antenne og 330 m med, så det blir 810 eller 891 m (875 m med 324 m, høyden fra 2000 til 2022). Rutene viser skog og mark mellom 790 og 911 moh som ligger høyst 900 m fra en bilvei eller skogsbilvei, så man rekker å bære kassen dit på 5–10 min. Høyde fra Kartverket (1 m-modell) i et rutenett på ca. 500 m, veier fra OpenStreetMap.',
++      'Horde AI svarer «2,7 eiffeltårn stablet oppå hverandre» på HORDEMINUS. Eiffeltårnet er 300 m uten antenne og 330 m med, så det blir 810 eller 891 m (875 m med 324 m, høyden fra 2000 til 2022). Rutene viser skog og mark mellom 790 og 911 moh som ligger høyst 900 m fra en bilvei eller skogsbilvei, så man rekker å bære kassen dit på 5–10 min. Sterk farge betyr at veien ligger mot sørøst, slik Anja skrev («KOM FRA DEN VEIEN ←», ca. 130°). Svak farge betyr at det bare er vei i andre retninger. Høyde fra Kartverket (1 m-modell) i et rutenett på ca. 500 m, veier fra OpenStreetMap.',
+@@@@ 7d0554e 09-24 18:44 Add default.no layers: 800–900 moh band, 800–900 m from road, search stops, rejected areas, field notes and Coop shops (with credit)
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 5ffba6f..75ace48 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -12,0 +13,6 @@ export type LagId =
++  | 'dn_hoyde'
++  | 'dn_vei'
++  | 'dn_plan'
++  | 'dn_avvist'
++  | 'dn_notater'
++  | 'coop'
+@@ -189,0 +196,60 @@ export const LAG: Lag[] = [
++  {
++    id: 'dn_hoyde',
++    navn: 'default.no: 800–900 moh',
++    kort: 'Høydebåndet for 2,7 eiffeltårn',
++    merkelapp: 'beregnet',
++    forklaring: 'Terreng 800–900 moh (oransje) og 780–920 moh (gult) fra Kartverkets 100 m-modell, laget av default.no. 2,7 eiffeltårn er 810–891 m avhengig av om tårnet regnes som 300, 324 eller 330 m.',
++    tegn: [
++      { stil: 'fyll', farge: '#f97316', tekst: '800–900 moh' },
++      { stil: 'fyll', farge: '#facc15', tekst: '780–920 moh' },
++    ],
++    kilde: 'default.no/map.php, hentet 24.09 kl. 18:36. Takk til default.no.',
++  },
++  {
++    id: 'dn_vei',
++    navn: 'default.no: 800–900 m fra vei',
++    kort: 'Hvis 891 er en avstand',
++    merkelapp: 'beregnet',
++    forklaring: 'Den andre lesningen av 891: steder som ligger 800–900 m fra nærmeste vei. Rødt = alle kjørbare veier inkludert skogsbilvei og traktorvei (OpenStreetMap), gult = bare offentlig vei. Laget av default.no, uten fly- og skogfilter.',
++    tegn: [
++      { stil: 'fyll', farge: '#dc2626', tekst: 'Alle kjørbare veier' },
++      { stil: 'fyll', farge: '#facc15', tekst: 'Bare offentlig vei' },
++    ],
++    kilde: 'default.no/map.php, hentet 24.09. Takk til default.no.',
++  },
++  {
++    id: 'dn_plan',
++    navn: 'default.no: letestopp',
++    kort: '40 rangerte steder å sjekke',
++    merkelapp: 'tolkning',
++    forklaring: 'Letelista til default.no: 40 steder rangert etter hvor godt de passer (skog, furu, stigning, fly, lite hus). Trykk på et nummer for å se parkering, gangavstand og retning.',
++    tegn: [{ stil: 'prikk', farge: '#0f766e', tekst: 'Letestopp (nummer = rangering)' }],
++    kilde: 'default.no/map.php («plan», laget 24.09 kl. 17:04). Takk til default.no.',
++  },
++  {
++    id: 'dn_avvist',
++    navn: 'default.no: avviste områder',
++    kort: 'Sjekket og forkastet, med grunn',
++    merkelapp: 'tolkning',
++    forklaring: 'Områder default.no har sjekket og forkastet, for eksempel fordi flyene hun så ikke kan ha vært høyt nok der, eller fordi det regnet der mens glasset var tørt.',
++    tegn: [{ stil: 'prikk', farge: '#64748b', tekst: 'Avvist område' }],
++    kilde: 'default.no/map.php. Takk til default.no.',
++  },
++  {
++    id: 'dn_notater',
++    navn: 'default.no: feltnotater',
++    kort: 'Bommer, private veier og sjekkede steder',
++    merkelapp: 'fakta',
++    forklaring: 'Notater fra folk som har vært ute og lett: bommer, private veier og steder som er sjekket til fots.',
++    tegn: [{ stil: 'prikk', farge: '#1e293b', tekst: 'Feltnotat' }],
++    kilde: 'default.no/map.php. Takk til default.no.',
++  },
++  {
++    id: 'coop',
++    navn: 'Coop-butikker',
++    kort: '«Dressing fra Coop»',
++    merkelapp: 'fakta',
++    forklaring: 'Anja skrev at pizzadressingen var fra Coop. Kartet viser Coop-butikker i området (Extra, Prix, Mega, Obs). Coop finnes nesten overalt, så dette sier mest om hvor mannskapet kan ha handlet.',
++    tegn: [{ stil: 'prikk', farge: '#00843d', tekst: 'Coop-butikk' }],
++    kilde: 'OpenStreetMap via default.no. Takk til default.no.',
++  },
+@@ -342 +408,2 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Høyden (2,7 eiffeltårn)', forklaring: '810 eller 891 moh, nær vei.', ider: ['hoyde891', 'fellesskap891'] },
++  { navn: 'Høyden (2,7 eiffeltårn)', forklaring: '810 eller 891 moh, nær vei. Eller 891 m fra vei.', ider: ['hoyde891', 'fellesskap891', 'dn_hoyde', 'dn_vei'] },
++  { navn: 'Fra default.no', forklaring: 'Letestopp, avviste områder og feltnotater. Takk til default.no.', ider: ['dn_plan', 'dn_avvist', 'dn_notater', 'coop'] },
+@@@@ 71778ff 09-24 19:02 Add all remaining default.no map layers, loaded only when switched on
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 75ace48..5d3de97 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -18,0 +19,29 @@ export type LagId =
++  | 'dn_skytefelt'
++  | 'dn_hogst'
++  | 'dn_steder'
++  | 'dn_omrader'
++  | 'dn_gasoner'
++  | 'dn_leder'
++  | 'dn_baer'
++  | 'dn_baerfunn'
++  | 'dn_orrfugl'
++  | 'dn_storfugl'
++  | 'dn_pizza'
++  | 'dn_flyhendelser'
++  | 'dn_sjelden'
++  | 'dn_flylyd'
++  | 'dn_regn'
++  | 'dn_radar'
++  | 'dn_met'
++  | 'dn_vaer'
++  | 'dn_vegkamera'
++  | 'dn_satellitt'
++  | 'dn_fusjon'
++  | 'dn_fusjon_utenlyd'
++  | 'dn_fusjon_fly'
++  | 'dn_fusjon_flyskog'
++  | 'dn_fusjon_stille'
++  | 'dn_fusjon_stilleskog'
++  | 'dn_fusjon_utenmerker'
++  | 'dn_fusjon_utenfly'
++  | 'dn_fusjon_utenflylyd'
+@@ -255,0 +285,360 @@ export const LAG: Lag[] = [
++  {
++    id: 'dn_skytefelt',
++    navn: 'Skytefelt',
++    kort: '«INGEN SKYTING»',
++    merkelapp: 'fakta',
++    forklaring: 'Forsvarets skyte- og øvingsfelt i Innlandet, blant annet Rødsmoen, Regionfelt Østlandet og Terningmoen. Anja skrev «INGEN SKYTING», og man skal uansett ikke gå inn her. default.no regner feltene som utelukket.',
++    tegn: [{ stil: 'stiplet', farge: '#b91c1c', tekst: 'Skytefelt (ikke gå inn)' }],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. Feltene er fra Forsvarsbygg via Geonorge.',
++  },
++  {
++    id: 'dn_hogst',
++    navn: 'Hogst',
++    kort: '«Det har vært hogd der jeg gikk»',
++    merkelapp: 'fakta',
++    forklaring: 'Flater som er hogd de siste årene, i de 34 områdene default.no har sjekket. Anja skrev at det har vært hogd der hun gikk, så kassen kan stå nær en fersk hogstflate. Svart strek er jernbane (tømmertog). Stiplet ramme viser hvor det finnes data.',
++    tegn: [
++      { stil: 'fyll', farge: '#ffd23c', tekst: 'Hogd 2016 eller senere' },
++      { stil: 'fyll', farge: '#ff7814', tekst: 'Hogd 2022 eller senere' },
++      { stil: 'fyll', farge: '#e61414', tekst: 'Hogd 2024–25' },
++      { stil: 'linje', farge: '#282828', tekst: 'Jernbane' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. Hogstdata fra Global Forest Watch.',
++  },
++  {
++    id: 'dn_steder',
++    navn: 'Konkrete steder',
++    kort: 'Vei, 5–10 min opp, furu, riktig relieff',
++    merkelapp: 'beregnet',
++    forklaring: 'default.no sitt stedsøk: steder 5–10 min gange oppover fra vei, med furu, terreng som ligner bildet (sett mot ca. 219°) og riktig solhorisont. Grønne prikker er de 126 beste stedene. Trykk for vei, høyde og stigning.',
++    tegn: [
++      { stil: 'prikk', farge: '#16a34a', tekst: 'Konkret sted' },
++      { stil: 'fyll', farge: '#e62828', tekst: 'Sterkt treff' },
++      { stil: 'fyll', farge: '#fac828', tekst: 'Mulig treff' },
++      { stil: 'fyll', farge: '#286ee6', tekst: 'Riktig avstand fra vei' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_omrader',
++    navn: 'Søkeområder',
++    kort: '34 områder med andel av sannsynligheten',
++    merkelapp: 'beregnet',
++    forklaring: 'Områdene default.no har søkt gjennom, ca. 24 × 24 km. Sterkere farge betyr større andel av sannsynligheten i fusjonsmodellen. Stiplet kant er en hypotese som ikke kommer fra modellen. Trykk på nummeret for km² med sterke og mulige steder, furu og hogst.',
++    tegn: [{ stil: 'rute', farge: '#ea580c', tekst: 'Søkeområde (nummer = rangering)' }],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_gasoner',
++    navn: 'Gå-soner fra vei',
++    kort: 'Skog 200–700 m fra vei',
++    merkelapp: 'beregnet',
++    forklaring: 'Skog som ligger 200–700 m fra vei i seks områder, altså en kort gåtur inn. Rødt er målt fra ordentlig vei, blått fra alle veier inkludert traktorvei.',
++    tegn: [
++      { stil: 'fyll', farge: '#c81e1e', tekst: 'Fra ordentlig vei' },
++      { stil: 'fyll', farge: '#1e64dc', tekst: 'Fra alle veier' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_leder',
++    navn: 'Pilegrimsleder',
++    kort: '«INGEN STIER»',
++    merkelapp: 'fakta',
++    forklaring: 'Merkede pilegrimsleder mot Nidaros. Den tykke er Østerdalsleden (Rena–Tynset–Trondheim). Anja skrev «INGEN STIER», så kassen står neppe rett ved en merket led.',
++    tegn: [
++      { stil: 'linje', farge: '#f59e0b', tekst: 'Østerdalsleden' },
++      { stil: 'linje', farge: '#cc88aa', tekst: 'Andre pilegrimsleder' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. Ledene er fra OpenStreetMap.',
++  },
++  {
++    id: 'dn_baer',
++    navn: 'Tyttebær eller blåbær',
++    kort: 'Tørr lynghei eller blåbærskog',
++    merkelapp: 'beregnet',
++    forklaring: 'Andel tyttebær og røsslyng mot blåbær, ut fra funn i Artsdatabanken, glattet over ca. 12 km. Rødt er tørr furumo med tyttebær og lyng, blått er frodigere blåbærskog. Et svakt bevis i default.no sin modell.',
++    tegn: [
++      { stil: 'fyll', farge: 'rgb(230,60,26)', tekst: 'Mest tyttebær og lyng' },
++      { stil: 'fyll', farge: 'rgb(128,60,128)', tekst: 'Blandet' },
++      { stil: 'fyll', farge: 'rgb(26,60,230)', tekst: 'Mest blåbær' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. Funn fra Artsdatabanken via GBIF.',
++  },
++  {
++    id: 'dn_baerfunn',
++    navn: 'Bærfunn',
++    kort: 'Enkeltfunn av tyttebær og blåbær',
++    merkelapp: 'fakta',
++    forklaring: 'Registrerte funn av tyttebær og blåbær 2015–2026 i Innlandet (ca. 8 400 funn). Viser mest hvor folk har registrert, ikke nødvendigvis hvor det vokser mest.',
++    tegn: [
++      { stil: 'prikk', farge: '#cc0000', tekst: 'Tyttebær' },
++      { stil: 'prikk', farge: '#0066cc', tekst: 'Blåbær' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. Artsdatabanken via GBIF.',
++  },
++  {
++    id: 'dn_orrfugl',
++    navn: 'Orrfugl',
++    kort: 'Lyden 24.09 kan være orrfuglspill',
++    merkelapp: 'fakta',
++    forklaring: 'Hvor det er registrert orrfugl 2015–2026, i ruter på ca. 2 × 1 km. Sterkere farge betyr flere funn. default.no mener en lyd på streamen 24.09 kan være orrfugl som spiller.',
++    tegn: [{ stil: 'fyll', farge: '#cc0000', tekst: 'Orrfugl (sterkere = flere funn)' }],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. Artsdatabanken via GBIF.',
++  },
++  {
++    id: 'dn_storfugl',
++    navn: 'Storfugl',
++    kort: 'Funn av storfugl',
++    merkelapp: 'fakta',
++    forklaring: 'Hvor det er registrert storfugl 2015–2026, i ruter på ca. 2 × 1 km. Sterkere farge betyr flere funn.',
++    tegn: [{ stil: 'fyll', farge: '#7700aa', tekst: 'Storfugl (sterkere = flere funn)' }],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. Artsdatabanken via GBIF.',
++  },
++  {
++    id: 'dn_pizza',
++    navn: 'Pizzasteder',
++    kort: 'Pizza på tavla',
++    merkelapp: 'fakta',
++    forklaring: 'Pizzasteder og restauranter med pizza i området, fra OpenStreetMap. Sier mest om hvor mannskapet kan ha spist.',
++    tegn: [{ stil: 'prikk', farge: '#dd5500', tekst: 'Pizzasted' }],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. OpenStreetMap.',
++  },
++  {
++    id: 'dn_flyhendelser',
++    navn: 'Fly ved hendelsene',
++    kort: '21.09 21:30, 22.09 20:33 og 20:35',
++    merkelapp: 'fakta',
++    forklaring: 'Alle 253 fly som var i lufta de tre gangene Anja reagerte på fly. Fargen viser høyden: mørk = lavt, lys gul = høyt. Rosa prikk er der flyet var da hun reagerte, rød prikk er der det var rett før lyden var sterkest (bare 21.09).',
++    tegn: [
++      { stil: 'linje', farge: 'rgb(253,231,37)', tekst: 'Høyt fly (ca. 40 000 fot)' },
++      { stil: 'linje', farge: 'rgb(68,1,84)', tekst: 'Lavt fly' },
++      { stil: 'prikk', farge: '#d946ef', tekst: 'Der flyet var da hun reagerte' },
++      { stil: 'prikk', farge: '#ef4444', tekst: 'Rett før lyden toppet' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. ADS-B fra adsb.lol.',
++  },
++  {
++    id: 'dn_sjelden',
++    navn: 'Stille himmel',
++    kort: '«INGEN FLY» om dagen, fly 21:30',
++    merkelapp: 'beregnet',
++    forklaring: 'Anja skrev «INGEN FLY» kl. 18:31 21.09, men så et fly 21:30. Lyseblått er der få fly gikk over 40° over horisonten kl. 07–18:31, men der flyet 21:30 var høyt nok. Sterkere blått passer bedre. Tallene er de beste rutene i det sannsynlige området.',
++    tegn: [
++      { stil: 'fyll', farge: '#0ea5e9', tekst: 'Passer godt' },
++      { stil: 'fyll', farge: '#50c8ff', tekst: 'Passer litt' },
++      { stil: 'prikk', farge: '#0369a1', tekst: 'Beste ruter (nummer)' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. ADS-B fra adsb.lol.',
++  },
++  {
++    id: 'dn_flylyd',
++    navn: 'Flylyd-match',
++    kort: 'Hørte fly mot fly i lufta',
++    merkelapp: 'beregnet',
++    forklaring: 'default.no har sammenlignet 21 flylyder på streamen med flyene som var i lufta. Rødt er der lyden passer best med flyene. Obs: lyden kan være spilt av på nytt i loop, se Analyse-fanen.',
++    tegn: [
++      { stil: 'fyll', farge: '#ff1e14', tekst: 'Beste 2 %' },
++      { stil: 'fyll', farge: '#ff9614', tekst: 'Topp 15 %' },
++      { stil: 'fyll', farge: '#ffdc14', tekst: 'Topp 40 %' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_regn',
++    navn: 'Regn siden søndag',
++    kort: 'Kameraet har vært tørt',
++    merkelapp: 'fakta',
++    forklaring: 'Regn siden søndag 21.09 kl. 06:50, fra 831 værstasjoner og 76 radarbilder. Glasset foran kameraet har vært tørt hele tiden, så blå områder passer dårlig.',
++    tegn: [
++      { stil: 'fyll', farge: '#1c6fd6', tekst: 'Over 6 mm' },
++      { stil: 'fyll', farge: '#6ea3e6', tekst: '0,3–6 mm' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. Frost (MET) og radar.',
++  },
++  {
++    id: 'dn_radar',
++    navn: 'Nedbørsradar 24.09',
++    kort: 'Radarbilde kl. 18:35',
++    merkelapp: 'fakta',
++    forklaring: 'Nedbørsradaren fra MET 24.09 kl. 18:35, samme som på yr.no. Grønt er lett regn, gult og rødt er kraftig. Et øyeblikksbilde, ikke oppdatert.',
++    tegn: [
++      { stil: 'fyll', farge: '#3caa3c', tekst: 'Lett' },
++      { stil: 'fyll', farge: '#ffe600', tekst: 'Moderat' },
++      { stil: 'fyll', farge: '#dc1414', tekst: 'Kraftig' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. Radar fra MET.',
++  },
++  {
++    id: 'dn_met',
++    navn: 'MET-vær 24.09',
++    kort: 'Temperatur, skyer og regn kl. 18',
++    merkelapp: 'fakta',
++    forklaring: 'Været i 81 punkter 24.09 ca. kl. 18 fra MET. Blått regner, grått er mer enn 70 % skyer, gult er klarere.',
++    tegn: [
++      { stil: 'prikk', farge: '#2563eb', tekst: 'Regner' },
++      { stil: 'prikk', farge: '#a8a29e', tekst: 'Overskyet' },
++      { stil: 'prikk', farge: '#fde68a', tekst: 'Klarere' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. MET.',
++  },
++  {
++    id: 'dn_vaer',
++    navn: 'Værstasjoner',
++    kort: 'Dugg og regn mot kameraet',
++    merkelapp: 'beregnet',
++    forklaring: 'De 400 værstasjonene default.no sammenligner med kameraet: dugg ved daggry, regn om morgenen og hvor fort det blir varmt. Rødt ligner mest på det kameraet viser.',
++    tegn: [
++      { stil: 'prikk', farge: 'rgb(255,57,51)', tekst: 'Ligner mest' },
++      { stil: 'prikk', farge: 'rgb(80,207,151)', tekst: 'Ligner lite' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. Frost (MET).',
++  },
++  {
++    id: 'dn_vegkamera',
++    navn: 'Veikameraer',
++    kort: '533 kameraer med vær',
++    merkelapp: 'fakta',
++    forklaring: 'Statens vegvesens værstasjoner og kameraer. Blått hadde nedbør 24.09 ca. kl. 18:30, gult var tørt, grått måler ikke nedbør. Trykk for å åpne kamerabildet (det siste bildet, ikke fra 24.09).',
++    tegn: [
++      { stil: 'prikk', farge: '#2563eb', tekst: 'Nedbør' },
++      { stil: 'prikk', farge: '#f59e0b', tekst: 'Tørt' },
++      { stil: 'prikk', farge: '#94a3b8', tekst: 'Måler ikke nedbør' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. Statens vegvesen.',
++  },
++  {
++    id: 'dn_satellitt',
++    navn: 'Satellitt 21.09',
++    kort: 'Sentinel-2, 30 m',
++    merkelapp: 'fakta',
++    forklaring: 'Satellittbilde fra 21.09 (Sentinel-2 via NASA), den klareste dagen default.no fant (ca. 22 % skyer rundt Evenstad). Oppløsningen er 30 m, så enkelttrær synes ikke, men hogstflater og myr gjør det.',
++    tegn: [{ stil: 'fyll', farge: '#4d7c0f', tekst: 'Satellittbilde' }],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no. NASA GIBS (HLS).',
++  },
++  {
++    id: 'dn_fusjon',
++    navn: 'Fusjon: alt bevis',
++    kort: 'default.no sin hovedmodell',
++    merkelapp: 'beregnet',
++    forklaring: 'default.no sin hovedmodell for hele Norge: flyene hun så, «INGEN FLY», regn, vær, satellittskyer, skog, furu, bær, skytefelt og kjøretid, vektet sammen. Rutene er ca. 5 × 5 km. Rødt er de beste 2 %. Trykk på et nummer for hvor mye av sannsynligheten som ligger innen 10 og 25 km.',
++    tegn: [
++      { stil: 'fyll', farge: '#ff1e14', tekst: 'Beste 2 % av rutene' },
++      { stil: 'fyll', farge: '#ff9614', tekst: 'Topp 15 %' },
++      { stil: 'fyll', farge: '#ffdc14', tekst: 'Topp 40 %' },
++      { stil: 'prikk', farge: '#dc2626', tekst: 'Toppområder (nummer = rangering)' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_fusjon_utenlyd',
++    navn: 'Fusjon: uten lyd og sol',
++    kort: 'Bare det hun skrev og viste',
++    merkelapp: 'beregnet',
++    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: de tre flyene hun så, INGEN FLY, regn, vær, skog og kjøretid, uten lyd og sol. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    tegn: [
++      { stil: 'fyll', farge: '#ff1e14', tekst: 'Beste 2 % av rutene' },
++      { stil: 'fyll', farge: '#ff9614', tekst: 'Topp 15 %' },
++      { stil: 'fyll', farge: '#ffdc14', tekst: 'Topp 40 %' },
++      { stil: 'prikk', farge: '#dc2626', tekst: 'Toppområder (nummer = rangering)' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_fusjon_fly',
++    navn: 'Fusjon: bare flyene',
++    kort: 'De tre flyene hun så',
++    merkelapp: 'beregnet',
++    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: bare de tre flyene hun så (21.09 21:30, 22.09 20:33 og 20:35). Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    tegn: [
++      { stil: 'fyll', farge: '#ff1e14', tekst: 'Beste 2 % av rutene' },
++      { stil: 'fyll', farge: '#ff9614', tekst: 'Topp 15 %' },
++      { stil: 'fyll', farge: '#ffdc14', tekst: 'Topp 40 %' },
++      { stil: 'prikk', farge: '#dc2626', tekst: 'Toppområder (nummer = rangering)' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_fusjon_flyskog',
++    navn: 'Fusjon: fly + skog',
++    kort: 'Flyene, skog, skyer og kjøretid',
++    merkelapp: 'beregnet',
++    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: de tre flyene, skog, satellittskyer og kjøretid. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    tegn: [
++      { stil: 'fyll', farge: '#ff1e14', tekst: 'Beste 2 % av rutene' },
++      { stil: 'fyll', farge: '#ff9614', tekst: 'Topp 15 %' },
++      { stil: 'fyll', farge: '#ffdc14', tekst: 'Topp 40 %' },
++      { stil: 'prikk', farge: '#dc2626', tekst: 'Toppområder (nummer = rangering)' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_fusjon_stille',
++    navn: 'Fusjon: fly + INGEN FLY',
++    kort: 'Flyene og stille dag',
++    merkelapp: 'beregnet',
++    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: de tre flyene og «INGEN FLY» om dagen. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    tegn: [
++      { stil: 'fyll', farge: '#ff1e14', tekst: 'Beste 2 % av rutene' },
++      { stil: 'fyll', farge: '#ff9614', tekst: 'Topp 15 %' },
++      { stil: 'fyll', farge: '#ffdc14', tekst: 'Topp 40 %' },
++      { stil: 'prikk', farge: '#dc2626', tekst: 'Toppområder (nummer = rangering)' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_fusjon_stilleskog',
++    navn: 'Fusjon: fly + INGEN FLY + skog',
++    kort: 'Uten regn og vær',
++    merkelapp: 'beregnet',
++    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: de tre flyene, «INGEN FLY», skog, skyer og kjøretid, uten regn og vær. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    tegn: [
++      { stil: 'fyll', farge: '#ff1e14', tekst: 'Beste 2 % av rutene' },
++      { stil: 'fyll', farge: '#ff9614', tekst: 'Topp 15 %' },
++      { stil: 'fyll', farge: '#ffdc14', tekst: 'Topp 40 %' },
++      { stil: 'prikk', farge: '#dc2626', tekst: 'Toppområder (nummer = rangering)' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_fusjon_utenmerker',
++    navn: 'Fusjon: uten flylyd-merking',
++    kort: 'Alt unntatt håndmerket lyd',
++    merkelapp: 'beregnet',
++    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: alt unntatt flylydene folk har merket for hånd. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    tegn: [
++      { stil: 'fyll', farge: '#ff1e14', tekst: 'Beste 2 % av rutene' },
++      { stil: 'fyll', farge: '#ff9614', tekst: 'Topp 15 %' },
++      { stil: 'fyll', farge: '#ffdc14', tekst: 'Topp 40 %' },
++      { stil: 'prikk', farge: '#dc2626', tekst: 'Toppområder (nummer = rangering)' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_fusjon_utenfly',
++    navn: 'Fusjon: uten fly',
++    kort: 'Regn, vær, skog og kjøretid',
++    merkelapp: 'beregnet',
++    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: ingen flydata, bare regn, vær, skog, satellittskyer og kjøretid (nesten flatt). Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    tegn: [
++      { stil: 'fyll', farge: '#ff1e14', tekst: 'Beste 2 % av rutene' },
++      { stil: 'fyll', farge: '#ff9614', tekst: 'Topp 15 %' },
++      { stil: 'fyll', farge: '#ffdc14', tekst: 'Topp 40 %' },
++      { stil: 'prikk', farge: '#dc2626', tekst: 'Toppområder (nummer = rangering)' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
++  {
++    id: 'dn_fusjon_utenflylyd',
++    navn: 'Fusjon: uten flylyd (eldre)',
++    kort: 'Eldre kjøring',
++    merkelapp: 'beregnet',
++    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: alt unntatt flylyd, fra en eldre kjøring. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    tegn: [
++      { stil: 'fyll', farge: '#ff1e14', tekst: 'Beste 2 % av rutene' },
++      { stil: 'fyll', farge: '#ff9614', tekst: 'Topp 15 %' },
++      { stil: 'fyll', farge: '#ffdc14', tekst: 'Topp 40 %' },
++      { stil: 'prikk', farge: '#dc2626', tekst: 'Toppområder (nummer = rangering)' },
++    ],
++    kilde: 'default.no/map.php (hentet 24.09 kl. 18:36). Takk til default.no.',
++  },
+@@ -409 +798,4 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Fra default.no', forklaring: 'Letestopp, avviste områder og feltnotater. Takk til default.no.', ider: ['dn_plan', 'dn_avvist', 'dn_notater', 'coop'] },
++  { navn: 'Fra default.no', forklaring: 'Letestopp, steder, avviste områder og feltnotater. Takk til default.no.', ider: ['dn_plan', 'dn_steder', 'dn_omrader', 'dn_avvist', 'dn_notater', 'coop', 'dn_pizza'] },
++  { navn: 'default.no: terreng og skog', forklaring: 'Skytefelt, hogst, stier, bær og fugl. Takk til default.no.', ider: ['dn_skytefelt', 'dn_hogst', 'dn_leder', 'dn_gasoner', 'dn_baer', 'dn_baerfunn', 'dn_orrfugl', 'dn_storfugl', 'dn_satellitt'] },
++  { navn: 'default.no: fly og vær', forklaring: 'Flyene hun så, stille himmel, regn og vær. Takk til default.no.', ider: ['dn_flyhendelser', 'dn_sjelden', 'dn_flylyd', 'dn_regn', 'dn_radar', 'dn_met', 'dn_vaer', 'dn_vegkamera'] },
++  { navn: 'default.no: modeller', forklaring: 'Fusjonsmodellen med ulike bevis slått av og på. Slå på én om gangen. Takk til default.no.', ider: ['dn_fusjon', 'dn_fusjon_utenlyd', 'dn_fusjon_fly', 'dn_fusjon_flyskog', 'dn_fusjon_stille', 'dn_fusjon_stilleskog', 'dn_fusjon_utenmerker', 'dn_fusjon_utenfly', 'dn_fusjon_utenflylyd'] },
+@@@@ 1ce4c01 09-24 19:04 Add «Mer fra default.no» to the Analyse tab, and draw search areas as outlines
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 5d3de97..1148d4f 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -327 +327 @@ export const LAG: Lag[] = [
+-    forklaring: 'Områdene default.no har søkt gjennom, ca. 24 × 24 km. Sterkere farge betyr større andel av sannsynligheten i fusjonsmodellen. Stiplet kant er en hypotese som ikke kommer fra modellen. Trykk på nummeret for km² med sterke og mulige steder, furu og hogst.',
++    forklaring: 'Områdene default.no har søkt gjennom, ca. 24 × 24 km. Tykkere kant betyr større andel av sannsynligheten i fusjonsmodellen. Stiplet kant er en hypotese som ikke kommer fra modellen. Trykk på nummeret for km² med sterke og mulige steder, furu og hogst.',
+@@@@ 8c4769a 09-24 19:05 Shorten the default.no layer texts for the new Kart tab rows
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 1148d4f..6cb9054 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -288 +288 @@ export const LAG: Lag[] = [
+-    kort: '«INGEN SKYTING»',
++    kort: 'Forsvarets skytefelt, ikke gå inn',
+@@ -290 +290 @@ export const LAG: Lag[] = [
+-    forklaring: 'Forsvarets skyte- og øvingsfelt i Innlandet, blant annet Rødsmoen, Regionfelt Østlandet og Terningmoen. Anja skrev «INGEN SKYTING», og man skal uansett ikke gå inn her. default.no regner feltene som utelukket.',
++    forklaring: 'Rødt stiplet er Forsvarets skyte- og øvingsfelt, som Rødsmoen og Regionfelt Østlandet. Anja skrev «INGEN SKYTING», så kassen står neppe her.',
+@@ -297 +297 @@ export const LAG: Lag[] = [
+-    kort: '«Det har vært hogd der jeg gikk»',
++    kort: 'Hogstflater, «det har vært hogd her»',
+@@ -299 +299 @@ export const LAG: Lag[] = [
+-    forklaring: 'Flater som er hogd de siste årene, i de 34 områdene default.no har sjekket. Anja skrev at det har vært hogd der hun gikk, så kassen kan stå nær en fersk hogstflate. Svart strek er jernbane (tømmertog). Stiplet ramme viser hvor det finnes data.',
++    forklaring: 'Gult er hogd etter 2016, oransje etter 2022 og rødt i 2024–25. Anja skrev at det har vært hogd der hun gikk, så let nær fersk hogst.',
+@@ -311 +311 @@ export const LAG: Lag[] = [
+-    kort: 'Vei, 5–10 min opp, furu, riktig relieff',
++    kort: '126 steder: nær vei, oppover, furu',
+@@ -313 +313 @@ export const LAG: Lag[] = [
+-    forklaring: 'default.no sitt stedsøk: steder 5–10 min gange oppover fra vei, med furu, terreng som ligner bildet (sett mot ca. 219°) og riktig solhorisont. Grønne prikker er de 126 beste stedene. Trykk for vei, høyde og stigning.',
++    forklaring: 'Grønne prikker er steder 5–10 min opp fra vei, med furu og terreng som ligner bildet. Rødt er sterke treff, gult mulige og blått riktig avstand fra vei.',
+@@ -325 +325 @@ export const LAG: Lag[] = [
+-    kort: '34 områder med andel av sannsynligheten',
++    kort: '34 områder default.no har søkt i',
+@@ -327 +327 @@ export const LAG: Lag[] = [
+-    forklaring: 'Områdene default.no har søkt gjennom, ca. 24 × 24 km. Tykkere kant betyr større andel av sannsynligheten i fusjonsmodellen. Stiplet kant er en hypotese som ikke kommer fra modellen. Trykk på nummeret for km² med sterke og mulige steder, furu og hogst.',
++    forklaring: 'Hver ramme er et område på ca. 24 × 24 km, og tykkere kant betyr mer sannsynlig. Trykk på nummeret for hvor mye sterke og mulige steder, furu og hogst det har.',
+@@ -336 +336 @@ export const LAG: Lag[] = [
+-    forklaring: 'Skog som ligger 200–700 m fra vei i seks områder, altså en kort gåtur inn. Rødt er målt fra ordentlig vei, blått fra alle veier inkludert traktorvei.',
++    forklaring: 'Skog en kort gåtur fra vei i seks områder. Rødt er målt fra ordentlig vei, blått fra alle veier inkludert traktorvei.',
+@@ -346 +346 @@ export const LAG: Lag[] = [
+-    kort: '«INGEN STIER»',
++    kort: 'Pilegrimsleder, «INGEN STIER»',
+@@ -348 +348 @@ export const LAG: Lag[] = [
+-    forklaring: 'Merkede pilegrimsleder mot Nidaros. Den tykke er Østerdalsleden (Rena–Tynset–Trondheim). Anja skrev «INGEN STIER», så kassen står neppe rett ved en merket led.',
++    forklaring: 'Merkede pilegrimsleder mot Nidaros, og den tykke gule er Østerdalsleden. Anja skrev «INGEN STIER», så kassen står neppe rett ved en led.',
+@@ -358 +358 @@ export const LAG: Lag[] = [
+-    kort: 'Tørr lynghei eller blåbærskog',
++    kort: 'Tyttebær- eller blåbærskog',
+@@ -360 +360 @@ export const LAG: Lag[] = [
+-    forklaring: 'Andel tyttebær og røsslyng mot blåbær, ut fra funn i Artsdatabanken, glattet over ca. 12 km. Rødt er tørr furumo med tyttebær og lyng, blått er frodigere blåbærskog. Et svakt bevis i default.no sin modell.',
++    forklaring: 'Rødt er tørr furumo med tyttebær og lyng, blått er frodigere blåbærskog. Bygget på funn i Artsdatabanken og et svakt bevis.',
+@@ -373 +373 @@ export const LAG: Lag[] = [
+-    forklaring: 'Registrerte funn av tyttebær og blåbær 2015–2026 i Innlandet (ca. 8 400 funn). Viser mest hvor folk har registrert, ikke nødvendigvis hvor det vokser mest.',
++    forklaring: 'Rød prikk er tyttebær, blå er blåbær, registrert 2015–2026. Viser mest hvor folk har registrert funn.',
+@@ -383 +383 @@ export const LAG: Lag[] = [
+-    kort: 'Lyden 24.09 kan være orrfuglspill',
++    kort: 'Orrfugl, lyden 24.09 kan være spill',
+@@ -385 +385 @@ export const LAG: Lag[] = [
+-    forklaring: 'Hvor det er registrert orrfugl 2015–2026, i ruter på ca. 2 × 1 km. Sterkere farge betyr flere funn. default.no mener en lyd på streamen 24.09 kan være orrfugl som spiller.',
++    forklaring: 'Rødt er ruter med registrert orrfugl, sterkere farge betyr flere funn. default.no mener en lyd på streamen 24.09 kan være orrfugl som spiller.',
+@@ -394 +394 @@ export const LAG: Lag[] = [
+-    forklaring: 'Hvor det er registrert storfugl 2015–2026, i ruter på ca. 2 × 1 km. Sterkere farge betyr flere funn.',
++    forklaring: 'Lilla er ruter med registrert storfugl 2015–2026, sterkere farge betyr flere funn.',
+@@ -401 +401 @@ export const LAG: Lag[] = [
+-    kort: 'Pizza på tavla',
++    kort: 'Pizzasteder i området',
+@@ -403 +403 @@ export const LAG: Lag[] = [
+-    forklaring: 'Pizzasteder og restauranter med pizza i området, fra OpenStreetMap. Sier mest om hvor mannskapet kan ha spist.',
++    forklaring: 'Oransje prikker er steder med pizza. Sier mest om hvor mannskapet kan ha spist.',
+@@ -410 +410 @@ export const LAG: Lag[] = [
+-    kort: '21.09 21:30, 22.09 20:33 og 20:35',
++    kort: 'Flyene da hun reagerte på fly',
+@@ -412 +412 @@ export const LAG: Lag[] = [
+-    forklaring: 'Alle 253 fly som var i lufta de tre gangene Anja reagerte på fly. Fargen viser høyden: mørk = lavt, lys gul = høyt. Rosa prikk er der flyet var da hun reagerte, rød prikk er der det var rett før lyden var sterkest (bare 21.09).',
++    forklaring: 'Alle fly i lufta 21.09 21:30 og 22.09 20:33 og 20:35, med lys gul for høye og mørk for lave fly. Rosa prikk er der flyet var da hun reagerte, så kassen bør ligge under et av sporene.',
+@@ -426 +426 @@ export const LAG: Lag[] = [
+-    forklaring: 'Anja skrev «INGEN FLY» kl. 18:31 21.09, men så et fly 21:30. Lyseblått er der få fly gikk over 40° over horisonten kl. 07–18:31, men der flyet 21:30 var høyt nok. Sterkere blått passer bedre. Tallene er de beste rutene i det sannsynlige området.',
++    forklaring: 'Blått er der få fly gikk høyt over om dagen, men flyet 21:30 var høyt nok. Det passer med at Anja skrev «INGEN FLY» kl. 18:31, og sterkere blått passer bedre.',
+@@ -437 +437 @@ export const LAG: Lag[] = [
+-    kort: 'Hørte fly mot fly i lufta',
++    kort: 'Flylyder mot fly i lufta',
+@@ -439 +439 @@ export const LAG: Lag[] = [
+-    forklaring: 'default.no har sammenlignet 21 flylyder på streamen med flyene som var i lufta. Rødt er der lyden passer best med flyene. Obs: lyden kan være spilt av på nytt i loop, se Analyse-fanen.',
++    forklaring: 'Rødt er der flylydene på streamen passer best med flyene i lufta. Lyden kan være spilt av på nytt, så dette er usikkert.',
+@@ -450 +450 @@ export const LAG: Lag[] = [
+-    kort: 'Kameraet har vært tørt',
++    kort: 'Regn siden søndag, kameraet er tørt',
+@@ -452 +452 @@ export const LAG: Lag[] = [
+-    forklaring: 'Regn siden søndag 21.09 kl. 06:50, fra 831 værstasjoner og 76 radarbilder. Glasset foran kameraet har vært tørt hele tiden, så blå områder passer dårlig.',
++    forklaring: 'Blått har fått regn siden 21.09, mørkere betyr mer. Glasset foran kameraet har vært tørt, så blå områder passer dårlig.',
+@@ -462 +462 @@ export const LAG: Lag[] = [
+-    kort: 'Radarbilde kl. 18:35',
++    kort: 'Nedbørsradar 24.09 kl. 18:35',
+@@ -464 +464 @@ export const LAG: Lag[] = [
+-    forklaring: 'Nedbørsradaren fra MET 24.09 kl. 18:35, samme som på yr.no. Grønt er lett regn, gult og rødt er kraftig. Et øyeblikksbilde, ikke oppdatert.',
++    forklaring: 'Grønt er lett regn, gult og rødt kraftig regn. Et øyeblikksbilde fra MET, ikke oppdatert.',
+@@ -475 +475 @@ export const LAG: Lag[] = [
+-    kort: 'Temperatur, skyer og regn kl. 18',
++    kort: 'Vær i 81 punkter 24.09 kl. 18',
+@@ -477 +477 @@ export const LAG: Lag[] = [
+-    forklaring: 'Været i 81 punkter 24.09 ca. kl. 18 fra MET. Blått regner, grått er mer enn 70 % skyer, gult er klarere.',
++    forklaring: 'Blått regner, grått er overskyet og gult er klarere. Sammenlign med været Anja ser.',
+@@ -488 +488 @@ export const LAG: Lag[] = [
+-    kort: 'Dugg og regn mot kameraet',
++    kort: 'Værstasjoner som ligner kameraet',
+@@ -490 +490 @@ export const LAG: Lag[] = [
+-    forklaring: 'De 400 værstasjonene default.no sammenligner med kameraet: dugg ved daggry, regn om morgenen og hvor fort det blir varmt. Rødt ligner mest på det kameraet viser.',
++    forklaring: 'Rødt er værstasjoner der dugg, morgenregn og oppvarming ligner mest på det kameraet viser.',
+@@ -500 +500 @@ export const LAG: Lag[] = [
+-    kort: '533 kameraer med vær',
++    kort: 'Veikameraer med vær',
+@@ -502 +502 @@ export const LAG: Lag[] = [
+-    forklaring: 'Statens vegvesens værstasjoner og kameraer. Blått hadde nedbør 24.09 ca. kl. 18:30, gult var tørt, grått måler ikke nedbør. Trykk for å åpne kamerabildet (det siste bildet, ikke fra 24.09).',
++    forklaring: 'Blått hadde nedbør 24.09 kl. 18:30, gult var tørt og grått måler ikke. Trykk for å åpne det siste kamerabildet.',
+@@ -513 +513 @@ export const LAG: Lag[] = [
+-    kort: 'Sentinel-2, 30 m',
++    kort: 'Satellittbilde 21.09, 30 m',
+@@ -515 +515 @@ export const LAG: Lag[] = [
+-    forklaring: 'Satellittbilde fra 21.09 (Sentinel-2 via NASA), den klareste dagen default.no fant (ca. 22 % skyer rundt Evenstad). Oppløsningen er 30 m, så enkelttrær synes ikke, men hogstflater og myr gjør det.',
++    forklaring: 'Satellittbilde fra den klareste dagen (21.09). Hogstflater og myr synes, enkelttrær gjør det ikke.',
+@@ -524 +524 @@ export const LAG: Lag[] = [
+-    forklaring: 'default.no sin hovedmodell for hele Norge: flyene hun så, «INGEN FLY», regn, vær, satellittskyer, skog, furu, bær, skytefelt og kjøretid, vektet sammen. Rutene er ca. 5 × 5 km. Rødt er de beste 2 %. Trykk på et nummer for hvor mye av sannsynligheten som ligger innen 10 og 25 km.',
++    forklaring: 'Alle bevisene til default.no vektet sammen, i ruter på ca. 5 × 5 km. Rødt er de beste 2 %, oransje topp 15 % og gult topp 40 %.',
+@@ -536 +536 @@ export const LAG: Lag[] = [
+-    kort: 'Bare det hun skrev og viste',
++    kort: 'Uten lyd og sol',
+@@ -538 +538 @@ export const LAG: Lag[] = [
+-    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: de tre flyene hun så, INGEN FLY, regn, vær, skog og kjøretid, uten lyd og sol. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    forklaring: 'default.no sin modell med bare bare det hun skrev og viste, uten lyd og sol. Rødt er de beste 2 %, oransje topp 15 % og gult topp 40 %.',
+@@ -550 +550 @@ export const LAG: Lag[] = [
+-    kort: 'De tre flyene hun så',
++    kort: 'Bare de tre flyene hun så',
+@@ -552 +552 @@ export const LAG: Lag[] = [
+-    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: bare de tre flyene hun så (21.09 21:30, 22.09 20:33 og 20:35). Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    forklaring: 'default.no sin modell med bare bare de tre flyene hun så. Rødt er de beste 2 %, oransje topp 15 % og gult topp 40 %.',
+@@ -566 +566 @@ export const LAG: Lag[] = [
+-    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: de tre flyene, skog, satellittskyer og kjøretid. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    forklaring: 'default.no sin modell med bare de tre flyene, skog, skyer og kjøretid. Rødt er de beste 2 %, oransje topp 15 % og gult topp 40 %.',
+@@ -578 +578 @@ export const LAG: Lag[] = [
+-    kort: 'Flyene og stille dag',
++    kort: 'Flyene og «INGEN FLY» om dagen',
+@@ -580 +580 @@ export const LAG: Lag[] = [
+-    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: de tre flyene og «INGEN FLY» om dagen. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    forklaring: 'default.no sin modell med bare de tre flyene og «INGEN FLY» om dagen. Rødt er de beste 2 %, oransje topp 15 % og gult topp 40 %.',
+@@ -592 +592 @@ export const LAG: Lag[] = [
+-    kort: 'Uten regn og vær',
++    kort: 'Flyene, «INGEN FLY», skog, uten regn',
+@@ -594 +594 @@ export const LAG: Lag[] = [
+-    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: de tre flyene, «INGEN FLY», skog, skyer og kjøretid, uten regn og vær. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    forklaring: 'default.no sin modell med bare de tre flyene, «INGEN FLY», skog, skyer og kjøretid. Rødt er de beste 2 %, oransje topp 15 % og gult topp 40 %.',
+@@ -606 +606 @@ export const LAG: Lag[] = [
+-    kort: 'Alt unntatt håndmerket lyd',
++    kort: 'Alt unntatt håndmerket flylyd',
+@@ -608 +608 @@ export const LAG: Lag[] = [
+-    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: alt unntatt flylydene folk har merket for hånd. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    forklaring: 'default.no sin modell med bare alt unntatt flylydene folk har merket. Rødt er de beste 2 %, oransje topp 15 % og gult topp 40 %.',
+@@ -620 +620 @@ export const LAG: Lag[] = [
+-    kort: 'Regn, vær, skog og kjøretid',
++    kort: 'Uten fly: regn, vær, skog, kjøretid',
+@@ -622 +622 @@ export const LAG: Lag[] = [
+-    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: ingen flydata, bare regn, vær, skog, satellittskyer og kjøretid (nesten flatt). Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    forklaring: 'default.no sin modell med bare regn, vær, skog, skyer og kjøretid, uten fly. Rødt er de beste 2 %, oransje topp 15 % og gult topp 40 %.',
+@@ -634 +634 @@ export const LAG: Lag[] = [
+-    kort: 'Eldre kjøring',
++    kort: 'Uten flylyd, eldre kjøring',
+@@ -636 +636 @@ export const LAG: Lag[] = [
+-    forklaring: 'default.no sin fusjonsmodell med bare noen av bevisene: alt unntatt flylyd, fra en eldre kjøring. Rutene er ca. 5 × 5 km. Fargen viser hvor godt ruta passer sammenlignet med resten av Norge.',
++    forklaring: 'default.no sin modell med bare alt unntatt flylyd, fra en eldre kjøring. Rødt er de beste 2 %, oransje topp 15 % og gult topp 40 %.',
+@@@@ e4f04b5 09-24 19:07 Credit default.no everywhere their data is used
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 6cb9054..62f3cb4 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -717 +717 @@ export const LAG: Lag[] = [
+-    kilde: 'default.no, 22.09 kl. 16:42.',
++    kilde: 'default.no, 22.09 kl. 16:42. Takk til default.no.',
+@@ -754 +754 @@ export const LAG: Lag[] = [
+-    kilde: 'ADS-B fra adsb.lol (via default.no). Streamen er 45 sek forsinket.',
++    kilde: 'ADS-B fra adsb.lol (via default.no). Streamen er 45 sek forsinket. Takk til default.no.',
+@@@@ 14d06ce 09-24 19:34 Credit Kartverket and OpenStreetMap contributors on the 810–891 moh layer
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 62f3cb4..44beb9b 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -223 +223 @@ export const LAG: Lag[] = [
+-    kilde: 'Kartverket høydedata og OpenStreetMap. Tallet fra Horde AI i appen 24.09.',
++    kilde: 'Høydedata © Kartverket (terrengmodell 1 m). Veier © OpenStreetMap-bidragsytere. Tallet fra Horde AI i appen 24.09.',
+@@@@ e537086 09-24 19:49 Publish the 810–891 moh near-road layer and give the red map distinct colours
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 44beb9b..2dde013 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -79 +79 @@ export const FARGE = {
+-  modell: ['#991b1b', '#ef4444', '#fb923c', '#fde68a'],
++  modell: ['#7f1d1d', '#f97316', '#facc15', '#fef3c7'],
+@@@@ a141dae 09-24 19:59 Correct place names on map markers after checking against Kartverket
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 2dde013..20915ff 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -748 +748 @@ export const LAG: Lag[] = [
+-      'Sporene til alle 49 fly som var i lufta 21:28–21:34 (ekte tid). Prikkene viser hvor hvert fly var da Anja pekte opp. Kassen bør ligge nær et spor. De to tykke sporene er flyene nærmest: NOZ56U nordover over Løten og NOZ9EG sørover over Ringsakfjellet. Ringene er 10 km rundt der de var. Svake spor er fly under 3000 fot.',
++      'Sporene til alle 49 fly som var i lufta 21:28–21:34 (ekte tid). Prikkene viser hvor hvert fly var da Anja pekte opp. Kassen bør ligge nær et spor. De to tykke sporene er flyene nærmest: NOZ56U nordover over Hamar, like ved Løten og NOZ9EG sørover over Ringsakfjellet. Ringene er 10 km rundt der de var. Svake spor er fly under 3000 fot.',
+@@@@ e96bf5c 09-25 08:23 Add a map layer for protected areas where hunting is banned
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 20915ff..cadb9fb 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -11,0 +12,2 @@ export type LagId =
++  | 'jaktfritt'
++  | 'jaktfritt_bare'
+@@ -667,0 +670,25 @@ export const LAG: Lag[] = [
++  {
++    id: 'jaktfritt',
++    navn: 'Verneområder der jakt er forbudt',
++    kort: 'Jakt forbudt eller delvis forbudt',
++    merkelapp: 'fakta',
++    forklaring:
++      'Anja skrev «INGEN SKYTING». Laget viser verneområder og om jakt er lov der. Klassen er lest ut fra verneforskriften for hvert område. «Delvis» betyr at bare noen arter eller perioder er lov, eller at noen arter (som ender og vadefugler) er fredet. Trykk på et område for å se setningen om jakt og lenke til forskriften.',
++    tegn: [
++      { stil: 'fyll', farge: '#e11d48', tekst: 'All jakt forbudt' },
++      { stil: 'fyll', farge: '#fda4af', tekst: 'Jakt delvis forbudt' },
++      { stil: 'linje', farge: '#64748b', tekst: 'Jakt tillatt etter vanlige regler' },
++      { stil: 'stiplet', farge: '#7c3aed', tekst: 'Uklart, les forskriften' },
++    ],
++    kilde: 'Miljødirektoratet (Naturbase) og verneforskriftene på Lovdata, hentet 24.09.2026.',
++  },
++  {
++    id: 'jaktfritt_bare',
++    navn: 'Bare der all jakt er forbudt',
++    kort: 'Streng filter: ingen jakt i det hele tatt',
++    merkelapp: 'fakta',
++    forklaring:
++      'Samme verneområder, men bare de der verneforskriften forbyr all jakt. Områder der noe jakt er lov (for eksempel elgjakt) er tatt bort.',
++    tegn: [{ stil: 'fyll', farge: '#e11d48', tekst: 'All jakt forbudt' }],
++    kilde: 'Miljødirektoratet (Naturbase) og verneforskriftene på Lovdata, hentet 24.09.2026.',
++  },
+@@ -802 +829 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser vanlig skog. Her passer det ikke.', ider: ['utelukket', 'kommuner', 'skydekke', 'solidag'] },
++  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser vanlig skog. Her passer det ikke.', ider: ['utelukket', 'jaktfritt', 'jaktfritt_bare', 'kommuner', 'skydekke', 'solidag'] },
+@@@@ 0e60e4c 09-25 08:24 Move the hunting-ban layers to their own group and add a «Der jakt er forbudt» view
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index cadb9fb..a83b5b9 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -829 +829,2 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser vanlig skog. Her passer det ikke.', ider: ['utelukket', 'jaktfritt', 'jaktfritt_bare', 'kommuner', 'skydekke', 'solidag'] },
++  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser vanlig skog. Her passer det ikke.', ider: ['utelukket', 'kommuner', 'skydekke', 'solidag'] },
++  { navn: 'Jakt og verneområder', forklaring: 'Anja skrev «INGEN SKYTING». Hvis det betyr at det ikke jaktes der, kan kassen stå der jakt er forbudt.', ider: ['jaktfritt', 'jaktfritt_bare'] },
+@@@@ 63416f0 09-25 11:07 Show only confirmed things on the map by default
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index a83b5b9..6e94096 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -5,0 +6 @@ export type LagId =
++  | 'hintmarkorer_alle'
+@@ -133,2 +134,2 @@ export const LAG: Lag[] = [
+-    navn: 'Hint på kartet',
+-    kort: 'Alle hint og tips som peker på et sted',
++    navn: 'Bekreftede hint på kartet',
++    kort: 'Bare hint som er bekreftet',
+@@ -135,0 +137,13 @@ export const LAG: Lag[] = [
++    forklaring:
++      'En markør for hvert bekreftet hint som handler om et bestemt sted. Tolkninger, rykter og det folk sier er ikke med her: slå på «Alle hint og tips på kartet» for å se dem. Rød kant = siste nytt. Tallet viser hvor mange ting som hører til stedet. Trykk på markøren for å lese, og «Les hele hintet» for å åpne hintkortet.',
++    tegn: [
++      { stil: 'prikk', farge: '#ea580c', tekst: 'Bekreftet hint' },
++      { stil: 'ring', farge: '#dc2626', tekst: 'Siste nytt' },
++    ],
++    kilde: 'Hint-fanen, bare hint med status «Bekreftet» eller «Løst».',
++  },
++  {
++    id: 'hintmarkorer_alle',
++    navn: 'Alle hint og tips på kartet',
++    kort: 'Også tolkninger, rykter og det folk sier',
++    merkelapp: 'tolkning',
+@@ -823 +837 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Hovedkart', forklaring: 'Hvor kassen mest sannsynlig står, og hvor hintene peker.', ider: ['hintmarkorer', 'modell', 'teoriomrader'] },
++  { navn: 'Hovedkart', forklaring: 'Hvor kassen mest sannsynlig står, og hvor hintene peker.', ider: ['hintmarkorer', 'hintmarkorer_alle', 'modell', 'teoriomrader'] },
+@@@@ 117ac73 09-25 11:18 Default map: the two planes she saw, and areas ruled out by weather, sun and vegetation
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 6e94096..08b8ae3 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -58,0 +59 @@ export type LagId =
++  | 'fly_alle'
+@@ -785,3 +786,17 @@ export const LAG: Lag[] = [
+-    navn: 'Fly i lufta kl. 21:29',
+-    kort: 'Anja pekte rett opp og skrev «FLY»',
+-    merkelapp: 'tolkning',
++    navn: 'Flyene hun så kl. 21:29',
++    kort: 'NOZ56U og NOZ9EG, nærmest da hun pekte',
++    merkelapp: 'fakta',
++    forklaring:
++      'Anja pekte rett opp og skrev «FLY» kl. 21:29. De to flyene som passer, var NOZ56U nordover over Hamar, like ved Løten, og NOZ9EG sørover over Ringsakfjellet. Sporene er fra ADS-B, prikkene viser hvor flyene var da hun pekte, og ringene er 10 km rundt. Kassen bør ligge nær et av dem. Slå på «Alle fly i lufta kl. 21:29» for å se de andre 47.',
++    tegn: [
++      { stil: 'linje', farge: FARGE.fly, tekst: 'Spor 21:28–21:34' },
++      { stil: 'prikk', farge: FARGE.fly, tekst: 'Posisjon da hun pekte opp' },
++      { stil: 'ring', farge: FARGE.fly, tekst: '10 km rundt' },
++    ],
++    kilde: 'ADS-B fra adsb.lol (via default.no). Streamen er 45 sek forsinket. Takk til default.no.',
++  },
++  {
++    id: 'fly_alle',
++    navn: 'Alle fly i lufta kl. 21:29',
++    kort: 'Alle 49 flyspor, også de som ikke passer',
++    merkelapp: 'fakta',
+@@ -845 +860 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Fly, retning og kjøretid', forklaring: 'Flyet hun pekte på, 118°-linjene og hvor langt man kommer fra Oslo.', ider: ['fly', 'retning', 'kjoretid'] },
++  { navn: 'Fly, retning og kjøretid', forklaring: 'Flyet hun pekte på, 118°-linjene og hvor langt man kommer fra Oslo.', ider: ['fly', 'fly_alle', 'retning', 'kjoretid'] },
+@@@@ 4a22327 09-25 11:21 Rename «Sol i dag» to «Sol 23.09»: the satellite image is from the daytime on 23.09
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 08b8ae3..dabb056 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -726 +726 @@ export const LAG: Lag[] = [
+-    navn: 'Sol i dag (satellitt)',
++    navn: 'Sol 23.09 (satellitt)',
+@@@@ 01ab80d 09-25 11:29 Add 25.09 whiteboards, Haaland/Brauta lead, Discord talk, Froland rain, delay change
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index dabb056..15ece60 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -11,0 +12 @@ export type LagId =
++  | 'vind'
+@@ -723,0 +725,14 @@ export const LAG: Lag[] = [
++  {
++    id: 'vind',
++    navn: 'Vind 23.09 kl. 17:49',
++    kort: 'Hun skrev «vindstille». Grått = for mye vind',
++    merkelapp: 'beregnet',
++    forklaring:
++      'Anja skrev «LYDTETT · SOL · VINDSTILLE» kl. 17:49 den 23.09. Kartet viser vinden 10 m over bakken akkurat da. Grønt passer, grått passer dårlig. Inne i tett skog er det ofte roligere enn modellen sier, så 2–4 m/s er ikke utelukket. Rutene er ca. 22 × 22 km.',
++    tegn: [
++      { stil: 'fyll', farge: '#10b981', tekst: 'Under 2 m/s: passer' },
++      { stil: 'fyll', farge: '#94a3b8', tekst: '2–4 m/s: mulig i le' },
++      { stil: 'fyll', farge: '#475569', tekst: 'Over 4 m/s: passer dårlig' },
++    ],
++    kilde: 'Modellvind fra open-meteo (historisk varsel, MET Nordic), hentet 25.09.',
++  },
+@@ -796 +811 @@ export const LAG: Lag[] = [
+-    kilde: 'ADS-B fra adsb.lol (via default.no). Streamen er 45 sek forsinket. Takk til default.no.',
++    kilde: 'ADS-B fra adsb.lol (via default.no). Streamen er trolig 20 sek–1 min forsinket (vi tipper). Takk til default.no.',
+@@ -810 +825 @@ export const LAG: Lag[] = [
+-    kilde: 'ADS-B fra adsb.lol (via default.no). Streamen er 45 sek forsinket. Takk til default.no.',
++    kilde: 'ADS-B fra adsb.lol (via default.no). Streamen er trolig 20 sek–1 min forsinket (vi tipper). Takk til default.no.',
+@@ -858 +873 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser vanlig skog. Her passer det ikke.', ider: ['utelukket', 'kommuner', 'skydekke', 'solidag'] },
++  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser vanlig skog. Her passer det ikke.', ider: ['utelukket', 'kommuner', 'skydekke', 'vind', 'solidag'] },
+@@@@ e4bd434 09-25 15:44 Turn on the hunting-ban layer by default and explain that almost all forest has active hunting now
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 15ece60..6b31296 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -692 +692 @@ export const LAG: Lag[] = [
+-      'Anja skrev «INGEN SKYTING». Laget viser verneområder og om jakt er lov der. Klassen er lest ut fra verneforskriften for hvert område. «Delvis» betyr at bare noen arter eller perioder er lov, eller at noen arter (som ender og vadefugler) er fredet. Trykk på et område for å se setningen om jakt og lenke til forskriften.',
++      'Anja skrev «INGEN SKYTING». Nå i slutten av september jaktes det i nesten all skog: småviltjakta startet 10.09 og elgjakta 25.09 i de fleste kommuner. Det finnes ikke åpne data om hvor jegerne er, så i stedet viser laget hvor jakt er forbudt, altså der det ikke skal skytes. Grå kant = jakt tillatt, altså trolig aktiv jakt. Klassen er lest ut fra verneforskriften for hvert område. «Delvis» betyr at bare noen arter eller perioder er lov, eller at noen arter (som ender og vadefugler) er fredet. Trykk på et område for å se setningen om jakt og lenke til forskriften.',
+@@@@ bb53374 09-25 15:47 Mark moose-hunting fields as unlikely; small-game and bird hunting are not excluded
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 6b31296..503895c 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -12,0 +13 @@ export type LagId =
++  | 'storvilt'
+@@ -685,0 +687,10 @@ export const LAG: Lag[] = [
++  {
++    id: 'storvilt',
++    navn: 'Elgjakt på statsgrunn (lite sannsynlig)',
++    kort: 'Storviltjakt med rifle, farlig. Kassen står ikke der',
++    merkelapp: 'fakta',
++    forklaring:
++      'Elgjakta startet 25.09, og den foregår med rifle. Kassen står ikke i farlig terreng, så områder med elgjakt er lite sannsynlige. Laget viser Statskogs storviltjaktfelt, altså statsgrunn der det jaktes elg. Elgjakt på privat grunn finnes ikke som åpne kartdata, så mye elgterreng mangler på kartet. Småvilt- og fuglejakt (hagle) er ikke regnet som utelukket.',
++    tegn: [{ stil: 'rute', farge: '#f59e0b', tekst: 'Elgjakt (Statskog)' }],
++    kilde: 'Statskog: Storviltjaktfelt (Geonorge), hentet 25.09.2026. Navn og telefonnummer til jaktledere er fjernet.',
++  },
+@@ -692 +703 @@ export const LAG: Lag[] = [
+-      'Anja skrev «INGEN SKYTING». Nå i slutten av september jaktes det i nesten all skog: småviltjakta startet 10.09 og elgjakta 25.09 i de fleste kommuner. Det finnes ikke åpne data om hvor jegerne er, så i stedet viser laget hvor jakt er forbudt, altså der det ikke skal skytes. Grå kant = jakt tillatt, altså trolig aktiv jakt. Klassen er lest ut fra verneforskriften for hvert område. «Delvis» betyr at bare noen arter eller perioder er lov, eller at noen arter (som ender og vadefugler) er fredet. Trykk på et område for å se setningen om jakt og lenke til forskriften.',
++      'Anja skrev «INGEN SKYTING». Nå i slutten av september jaktes det i nesten all skog: småviltjakta startet 10.09 og elgjakta 25.09 i de fleste kommuner. Småvilt- og fuglejakt (hagle) er ikke regnet som utelukket, men elgjakt (rifle) er farlig og regnes som lite sannsynlig: se laget «Elgjakt på statsgrunn». Dette laget viser hvor jakt er forbudt, altså der det ikke skal skytes. Grå kant = jakt tillatt, altså trolig aktiv jakt. Klassen er lest ut fra verneforskriften for hvert område. «Delvis» betyr at bare noen arter eller perioder er lov, eller at noen arter (som ender og vadefugler) er fredet. Trykk på et område for å se setningen om jakt og lenke til forskriften.',
+@@ -874 +885 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Jakt og verneområder', forklaring: 'Anja skrev «INGEN SKYTING». Hvis det betyr at det ikke jaktes der, kan kassen stå der jakt er forbudt.', ider: ['jaktfritt', 'jaktfritt_bare'] },
++  { navn: 'Jakt og verneområder', forklaring: 'Anja skrev «INGEN SKYTING». Hvis det betyr at det ikke jaktes der, kan kassen stå der jakt er forbudt.', ider: ['storvilt', 'jaktfritt', 'jaktfritt_bare'] },
+@@@@ 889d715 09-25 16:06 Count Hagina's birch observation: pull down high terrain around Ringsakfjellet/Sjusjøen
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 503895c..e67a2fd 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -236 +236 @@ export const LAG: Lag[] = [
+-      'Horde AI svarer «2,7 eiffeltårn stablet oppå hverandre» på HORDEMINUS. Eiffeltårnet er 300 m uten antenne og 330 m med, så det blir 810 eller 891 m (875 m med 324 m, høyden fra 2000 til 2022). Rutene viser skog og mark mellom 790 og 911 moh som ligger høyst 900 m fra en bilvei eller skogsbilvei, så man rekker å bære kassen dit på 5–10 min. Sterk farge betyr at veien ligger mot sørøst, slik Anja skrev («KOM FRA DEN VEIEN ←», ca. 130°). Svak farge betyr at det bare er vei i andre retninger. Høyde fra Kartverket (1 m-modell) i et rutenett på ca. 500 m, veier fra OpenStreetMap.',
++      'Horde AI svarer «2,7 eiffeltårn stablet oppå hverandre» på HORDEMINUS. Eiffeltårnet er 300 m uten antenne og 330 m med, så det blir 810 eller 891 m (875 m med 324 m, høyden fra 2000 til 2022). Rutene viser skog og mark mellom 790 og 911 moh som ligger høyst 900 m fra en bilvei eller skogsbilvei, så man rekker å bære kassen dit på 5–10 min. Sterk farge betyr at veien ligger mot sørøst, slik Anja skrev («KOM FRA DEN VEIEN ←», ca. 130°). Svak farge betyr at det bare er vei i andre retninger. Høyde fra Kartverket (1 m-modell) i et rutenett på ca. 500 m, veier fra OpenStreetMap. Mot: Hagina så 25.09 at bjørka er for langt på høsten allerede på ca. 510 moh ved Sjusjøen, så 810–891 moh i det området passer dårlig.',
+@@@@ 9a7359b 09-25 18:02 Add the 17:22 sighting: she pointed up while SAS50J was over east Stange (ADS-B), track on the map
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index e67a2fd..669b051 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -816 +816 @@ export const LAG: Lag[] = [
+-      'Anja pekte rett opp og skrev «FLY» kl. 21:29. De to flyene som passer, var NOZ56U nordover over Hamar, like ved Løten, og NOZ9EG sørover over Ringsakfjellet. Sporene er fra ADS-B, prikkene viser hvor flyene var da hun pekte, og ringene er 10 km rundt. Kassen bør ligge nær et av dem. Slå på «Alle fly i lufta kl. 21:29» for å se de andre 47.',
++      'Anja pekte rett opp og skrev «FLY» kl. 21:29. De to flyene som passer, var NOZ56U nordover over Hamar, like ved Løten, og NOZ9EG sørover over Ringsakfjellet. Sporene er fra ADS-B, prikkene viser hvor flyene var da hun pekte, og ringene er 10 km rundt. Kassen bør ligge nær et av dem. Slå på «Alle fly i lufta kl. 21:29» for å se de andre 47. Lilla spor: SAS50J 25.09 kl. 17:22, da hun pekte opp igjen, over østre Stange.',
+@@ -820,0 +821 @@ export const LAG: Lag[] = [
++      { stil: 'linje', farge: '#7c3aed', tekst: 'SAS50J 25.09 kl. 17:22' },
+@@@@ ae6dc67 09-25 19:19 Add a map layer for forest that matches «35% bjørk, 25% gran, 40% furu»
+
+diff --git a/src/data/lag.ts b/src/data/lag.ts
+index 669b051..8506453 100644
+--- a/src/data/lag.ts
++++ b/src/data/lag.ts
+@@ -13,0 +14 @@ export type LagId =
++  | 'treslag'
+@@ -686,0 +688,14 @@ export const LAG: Lag[] = [
++  {
++    id: 'treslag',
++    navn: 'Skog som ligner (bjørk, gran, furu)',
++    kort: '«35 % bjørk, 25 % gran, 40 % furu» rundt henne',
++    merkelapp: 'beregnet',
++    forklaring:
++      'Anja skrev kl. 18:13 den 25.09: «KANSKJE 35% BJØRK, 25% GRAN, 40% FURU. AKKURAT RUNDT MEG.» Kartet viser hvor skogen har omtrent den blandingen, regnet ut fra NIBIOs skogkart SR16 i ruter på ca. 2 × 2 km. Mørk grønn = svært lik. SR16 viser treslaget som dominerer i hver bestand, så andelene er grove, og «kanskje» betyr at tallene hennes også er anslag.',
++    tegn: [
++      { stil: 'rute', farge: '#166534', tekst: 'Svært lik (over 85 %)' },
++      { stil: 'rute', farge: '#16a34a', tekst: 'Lik (75–85 %)' },
++      { stil: 'rute', farge: '#86efac', tekst: 'Litt lik (65–75 %)' },
++    ],
++    kilde: 'NIBIO: SR16 skogressurskart (dominerende treslag), hentet 25.09.2026.',
++  },
+@@ -885 +900 @@ export const GRUPPER: { navn: string; forklaring: string; ider: LagId[] }[] = [
+-  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser vanlig skog. Her passer det ikke.', ider: ['utelukket', 'kommuner', 'skydekke', 'vind', 'solidag'] },
++  { navn: 'Vær og terreng', forklaring: 'Anja har hatt klar himmel og sol, og ser vanlig skog. Her passer det ikke.', ider: ['treslag', 'utelukket', 'kommuner', 'skydekke', 'vind', 'solidag'] },

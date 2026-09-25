@@ -1,0 +1,433 @@
+{
+ "type": "FeatureCollection",
+ "properties": {
+  "source": "evidence/sources/prior_years_organizer_patterns.md",
+  "note": "Prior-year Horde hunt reference geometry. No exact find coordinates were ever published; these are municipality/area references only."
+ },
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "year": 2023,
+    "kind": "municipality",
+    "name": "Tokke kommune (2023 find municipality per news)",
+    "confidence": "municipality level; exact spot unpublished"
+   },
+   "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [
+     [
+      [
+       [
+        7.54,
+        59.399
+       ],
+       [
+        7.595,
+        59.377
+       ],
+       [
+        7.615,
+        59.329
+       ],
+       [
+        7.755,
+        59.329
+       ],
+       [
+        7.808,
+        59.359
+       ],
+       [
+        7.856,
+        59.36
+       ],
+       [
+        7.969,
+        59.35
+       ],
+       [
+        7.997,
+        59.335
+       ],
+       [
+        8.061,
+        59.357
+       ],
+       [
+        8.12,
+        59.339
+       ],
+       [
+        8.244,
+        59.39
+       ],
+       [
+        8.241,
+        59.405
+       ],
+       [
+        8.317,
+        59.398
+       ],
+       [
+        8.334,
+        59.422
+       ],
+       [
+        8.285,
+        59.434
+       ],
+       [
+        8.268,
+        59.474
+       ],
+       [
+        8.325,
+        59.487
+       ],
+       [
+        8.325,
+        59.541
+       ],
+       [
+        8.34,
+        59.548
+       ],
+       [
+        8.301,
+        59.571
+       ],
+       [
+        8.261,
+        59.558
+       ],
+       [
+        8.241,
+        59.581
+       ],
+       [
+        8.202,
+        59.562
+       ],
+       [
+        8.179,
+        59.567
+       ],
+       [
+        8.179,
+        59.55
+       ],
+       [
+        8.105,
+        59.55
+       ],
+       [
+        8.081,
+        59.571
+       ],
+       [
+        8.056,
+        59.553
+       ],
+       [
+        8.001,
+        59.563
+       ],
+       [
+        7.988,
+        59.541
+       ],
+       [
+        8.003,
+        59.523
+       ],
+       [
+        7.966,
+        59.487
+       ],
+       [
+        7.84,
+        59.545
+       ],
+       [
+        7.825,
+        59.586
+       ],
+       [
+        7.846,
+        59.596
+       ],
+       [
+        7.727,
+        59.585
+       ],
+       [
+        7.648,
+        59.6
+       ],
+       [
+        7.552,
+        59.587
+       ],
+       [
+        7.515,
+        59.561
+       ],
+       [
+        7.536,
+        59.524
+       ],
+       [
+        7.626,
+        59.462
+       ],
+       [
+        7.566,
+        59.438
+       ],
+       [
+        7.577,
+        59.426
+       ],
+       [
+        7.54,
+        59.399
+       ]
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "year": 2023,
+    "kind": "border_line",
+    "name": "Vinje/Tokke border (community: 2023 box at «grensen Vinje/Tokke»)",
+    "confidence": "community framing (mkekeoooo issue #9 via search summary)"
+   },
+   "geometry": {
+    "type": "MultiLineString",
+    "coordinates": [
+     [
+      [
+       8.249636326588819,
+       59.57106822442286
+      ],
+      [
+       8.241,
+       59.581
+      ],
+      [
+       8.202,
+       59.562
+      ],
+      [
+       8.179,
+       59.567
+      ],
+      [
+       8.179,
+       59.55537126295868
+      ]
+     ],
+     [
+      [
+       8.154829316685928,
+       59.55
+      ],
+      [
+       8.120267860488333,
+       59.55
+      ]
+     ],
+     [
+      [
+       8.088761350694494,
+       59.56420881814231
+      ],
+      [
+       8.081,
+       59.571
+      ],
+      [
+       8.056,
+       59.553
+      ],
+      [
+       8.001,
+       59.563
+      ],
+      [
+       7.988,
+       59.541
+      ],
+      [
+       8.003,
+       59.523
+      ],
+      [
+       7.966,
+       59.487
+      ],
+      [
+       7.84,
+       59.545
+      ],
+      [
+       7.825,
+       59.586
+      ],
+      [
+       7.846,
+       59.596
+      ],
+      [
+       7.727,
+       59.585
+      ],
+      [
+       7.648,
+       59.6
+      ],
+      [
+       7.552,
+       59.587
+      ],
+      [
+       7.549311281271281,
+       59.585110630082525
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "year": 2023,
+    "kind": "reference_point",
+    "name": "Åmot (Vinje) – where finder Sundklakk was working and saw the same snow",
+    "note": "reference point, not find spot",
+    "osrm_h_from_oslo": 3.7,
+    "osrm_km_from_oslo": 217
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     7.99,
+     59.572
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "year": 2023,
+    "kind": "reference_point",
+    "name": "Høydalsmo (Tokke, on E134)",
+    "note": "reference point",
+    "osrm_h_from_oslo": 3.23,
+    "osrm_km_from_oslo": 196
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     8.197,
+     59.497
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "year": 2023,
+    "kind": "reference_point",
+    "name": "Dalen (Tokke adm. centre) = Magnus pin «2023: Tokke (område)»",
+    "note": "placeholder pin, innhold.ts:1076",
+    "osrm_h_from_oslo": 3.65,
+    "osrm_km_from_oslo": 221
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     7.989,
+     59.444
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "year": 2024,
+    "kind": "reference_point",
+    "name": "Kongsberg town = Magnus pin «2024: Kongsberg-området»",
+    "note": "placeholder pin, innhold.ts:1077",
+    "osrm_h_from_oslo": 1.4,
+    "osrm_km_from_oslo": 86
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     9.65,
+     59.668
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "year": 2024,
+    "kind": "reference_point",
+    "name": "Saggrenda / Kongens gruve (approx.)",
+    "note": "approximate reference point for the silver-mine field",
+    "osrm_h_from_oslo": 1.52,
+    "osrm_km_from_oslo": 93
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     9.556,
+     59.628
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "year": 2024,
+    "kind": "approx_area",
+    "name": "Kongsberg silver-mine field, approximate bbox («ved sølvgruvene på Kongsberg»)",
+    "confidence": "approximate [I]; exact spot unpublished"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       9.6,
+       59.6
+      ],
+      [
+       9.6,
+       59.69
+      ],
+      [
+       9.49,
+       59.69
+      ],
+      [
+       9.49,
+       59.6
+      ],
+      [
+       9.6,
+       59.6
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

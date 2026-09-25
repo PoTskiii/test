@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -54,6 +55,22 @@ DEFAULT_PRIORITY = {"whiteboard_text": 5, "whiteboard_text_vlm": 4, "engine_rank
 DEFAULT_TAGS = {"whiteboard_text": ["memo"], "whiteboard_text_vlm": ["memo", "robot"],
                 "engine_ranking_change": ["world_map"], "aircraft_layer": ["airplane"], "astro": ["star"],
                 "latency_calibrated": ["stopwatch"], "engine_run_failed": ["warning"]}
+
+
+# ntfy's JSON API wants an integer priority 1..5; the header API's names are accepted in the config too
+PRIORITY_NAMES = {"min": 1, "low": 2, "default": 3, "high": 4, "max": 5, "urgent": 5}
+TOPIC_RE = re.compile(r"^[-_A-Za-z0-9]{1,64}$")      # what ntfy.sh accepts as a topic name
+
+
+def _priority(x, default: int = 3) -> int:
+    """Coerce a config priority (1-5 or min/low/default/high/max/urgent) to ntfy's integer 1..5.
+    A value ntfy would reject (HTTP 400) is a poison message: the cursor would never advance again."""
+    if isinstance(x, str):
+        x = PRIORITY_NAMES.get(x.strip().lower(), x)
+    try:
+        return int(min(5, max(1, int(x))))
+    except (TypeError, ValueError):
+        return default
 
 
 def _http_post_json(url: str, payload: dict, token: Optional[str] = None, timeout: float = 10.0) -> int:
@@ -75,6 +92,8 @@ class NtfyNotifier:
                  warn_every_s: float = 600.0, post: Optional[Callable] = None):
         if not topic:
             raise ValueError("ntfy topic required")
+        if not TOPIC_RE.match(str(topic)):
+            raise ValueError(f"invalid ntfy topic {topic!r}: use 1-64 of A-Z a-z 0-9 _ - (ntfy rejects others)")
         self.db_path = str(db_path)
         self.topic = str(topic)
         self.server = str(server or "https://ntfy.sh").rstrip("/")
@@ -82,7 +101,7 @@ class NtfyNotifier:
         self.click_url = click_url
         self.kinds = set(kinds) if kinds else None
         self.exclude = set(exclude_kinds or ())
-        self.priority = {**DEFAULT_PRIORITY, **(priority or {})}
+        self.priority = {k: _priority(v) for k, v in {**DEFAULT_PRIORITY, **(priority or {})}.items()}
         self.poll_s = float(poll_s)
         self.max_backlog = int(max_backlog)
         self.max_age_s = float(max_age_s)
@@ -119,7 +138,7 @@ class NtfyNotifier:
     def payload(self, ev) -> dict:
         kind = ev["kind"] or "event"
         p = {"topic": self.topic, "title": f"hordewatch: {kind}"[:120], "message": (ev["summary"] or kind)[:3500],
-             "priority": int(self.priority.get(kind, 3)), "tags": list(DEFAULT_TAGS.get(kind, ["bell"]))}
+             "priority": _priority(self.priority.get(kind, 3)), "tags": list(DEFAULT_TAGS.get(kind, ["bell"]))}
         if self.click_url:
             p["click"] = self.click_url
         return p

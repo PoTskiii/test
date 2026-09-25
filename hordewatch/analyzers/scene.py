@@ -34,7 +34,10 @@ Persistence and gating
     the model and emits ``scene_change`` {camera_shift} - someone touched the
     camera, which itself is news.
   * Areas excluded: configured rectangles (``exclude_norm``), the whiteboard
-    bbox, the person bbox published by the gesture analyzer, pixels with a
+    bbox, the person bbox published by the gesture analyzer (sticky for
+    ``person_hold_s``: a person who sits still is absorbed into the gesture
+    analyzer's background and stops being published; person areas are learnt
+    at the normal rate meanwhile), pixels with a
     high long-term *activity* rate (the box interior where Anja moves, trees
     swaying) and learnt "hot zones" (the same place reported repeatedly).
   * Day and IR-night have separate reference models (the IR illuminator gives a
@@ -62,7 +65,14 @@ Classification of a confirmed component (on the full-resolution crop)
 
 Timestamps: ``Observation.ts`` is the real time of the first frame in which the
 change was seen (onset), ``value.onset_window`` brackets it with the previous
-frame, ``value.detected_ts`` is when persistence confirmed it.
+frame, ``value.detected_ts`` is when persistence confirmed it. ``ts_capture``
+always belongs to the same (onset) frame as ``ts`` so bridges that undo the
+latency from ``ts_capture`` get the onset, not the confirmation frame.
+
+Resolution changes: every frame is resized to a fixed working width (up or
+down), so a stream that drops to 144p and back keeps its model; a change of the
+source size only triggers a few frames of fast re-adaptation (no event).
+Grey (2-D), RGBA and float frames are coerced to RGB uint8.
 
 Failure modes: moving sun flecks under the canopy (slow; mostly absorbed),
 snow/frost changing the ground (global), heavy rain on the lens, objects that
@@ -81,6 +91,7 @@ import numpy as np
 
 from ..types import Observation, iso
 from .base import Analyzer, Context
+from .whiteboard import as_rgb_u8
 
 log = logging.getLogger("hordewatch.scene")
 
@@ -226,7 +237,8 @@ class SceneChangeAnalyzer(Analyzer):
                 "min_area_frac": 0.0012, "max_area_frac": 0.25, "global_frac": 0.3, "warmup_frames": 3,
                 "exclude_norm": [], "activity_alpha": 0.03, "activity_thr": 0.3, "activity_min_frames": 30,
                 "global_event_min_interval_s": 300.0, "max_shift_px": 6.0, "hot_window_s": 3600.0,
-                "hot_count": 3, "hot_suppress_s": 3600.0, "mode_hysteresis": 2, "person_margin": 0.15}
+                "hot_count": 3, "hot_suppress_s": 3600.0, "mode_hysteresis": 2, "person_margin": 0.15,
+                "person_hold_s": 600.0}
 
     def __init__(self, config=None):
         super().__init__(config)
@@ -237,34 +249,72 @@ class SceneChangeAnalyzer(Analyzer):
         self._last_mode_ts = None
         self._history = deque(maxlen=64)       # (real_ts, capture_ts, frame_id) per frame
         self._last_global = None
+        self._person_mem = []                  # [[bbox full-res, last_seen_real_ts], ...] sticky person areas
         self._shape = None
 
     # ------------------------------------------------------------------ helpers
+    def _person_boxes(self, ctx, frame):
+        """Person areas to exclude. Sticky: the gesture analyzer's median background absorbs a person
+        who sits still for a few minutes, after which it publishes no person_bbox although she is still
+        there - and this analyzer (which never learnt her, she was excluded) would then report her as a
+        new object. So every area where a person was seen stays excluded for person_hold_s."""
+        now = frame.real_ts
+        hold = float(self.p["person_hold_s"])
+        pb = ctx.state.get("person_bbox")
+        if isinstance(pb, dict) and pb.get("bbox") is not None:
+            idx = pb.get("frame_index")
+            # fresh = published for this or one of the last 2 frames (an index that went backwards, e.g.
+            # after an ingest restart, means stale)
+            if idx is None or 0 <= frame.index - idx <= 2:
+                try:
+                    bb = [float(v) for v in pb["bbox"]]
+                except (TypeError, ValueError):
+                    bb = None
+                if bb is not None:
+                    for m in self._person_mem:
+                        if _bbox_iou(m[0], bb) > 0.3:
+                            m[0], m[1] = bb, now
+                            break
+                    else:
+                        self._person_mem.append([bb, now])
+        self._person_mem = [m for m in self._person_mem if 0 <= (now - m[1]).total_seconds() <= hold][-16:]
+        return [m[0] for m in self._person_mem]
+
     def _exclusion(self, ctx, frame, h, w, sx, sy, model: _Model):
+        """Returns (all excluded pixels, person pixels). Person pixels are learnt at the normal rate."""
         ex = np.zeros((h, w), bool)
+        ex_person = np.zeros((h, w), bool)
         for r in self.p.get("exclude_norm") or []:
-            x0, y0, x1, y1 = r
+            try:
+                x0, y0, x1, y1 = [min(1.0, max(0.0, float(v))) for v in r]
+            except (TypeError, ValueError):
+                log.warning("scene: ignoring malformed exclude_norm entry %r (want [x0, y0, x1, y1] in 0..1)", r)
+                continue
             ex[int(y0 * h):int(np.ceil(y1 * h)), int(x0 * w):int(np.ceil(x1 * w))] = True
         boxes = []
         wbs = ctx.state.get("whiteboard")
         if isinstance(wbs, dict) and wbs.get("bbox") is not None:
-            boxes.append((wbs["bbox"], 0.1))
-        pb = ctx.state.get("person_bbox")
-        if isinstance(pb, dict) and pb.get("bbox") is not None:
-            idx = pb.get("frame_index")
-            if idx is None or frame.index - idx <= 2:
-                boxes.append((pb["bbox"], self.p["person_margin"]))
-        for (x0, y0, x1, y1), m in boxes:
+            boxes.append((wbs["bbox"], 0.1, False))
+        for bb in self._person_boxes(ctx, frame):
+            boxes.append((bb, self.p["person_margin"], True))
+        for bb, m, is_person in boxes:
+            try:
+                x0, y0, x1, y1 = [float(v) for v in bb]
+            except (TypeError, ValueError):
+                continue
             bw, bh = (x1 - x0) * m, (y1 - y0) * m
-            ex[max(0, int((y0 - bh) * sy)):int(np.ceil((y1 + bh) * sy)),
-               max(0, int((x0 - bw) * sx)):int(np.ceil((x1 + bw) * sx))] = True
+            sl = (slice(max(0, int((y0 - bh) * sy)), max(0, int(np.ceil((y1 + bh) * sy)))),
+                  slice(max(0, int((x0 - bw) * sx)), max(0, int(np.ceil((x1 + bw) * sx)))))
+            ex[sl] = True
+            if is_person:
+                ex_person[sl] = True
         if model.n >= self.p["activity_min_frames"]:
             ex |= model.activity > self.p["activity_thr"]
         now = frame.real_ts
         model.hot = [(b, until) for b, until in model.hot if until > now]
         for (x0, y0, x1, y1), _ in model.hot:
             ex[y0:y1, x0:x1] = True
-        return ex
+        return ex, ex_person
 
     def _register(self, model: _Model, F):
         """Translation of the current edge map relative to the background (camera wobble)."""
@@ -283,12 +333,21 @@ class SceneChangeAnalyzer(Analyzer):
 
     def _process(self, frame, ctx: Context):
         out = []
-        img = frame.image
+        img = as_rgb_u8(frame.image)
         H, W = img.shape[:2]
-        s = min(1.0, self.p["work_w"] / float(W))
-        small = cv2.resize(img, (int(round(W * s)), int(round(H * s))), interpolation=cv2.INTER_AREA) if s < 1 else img
+        if H < 8 or W < 8:
+            return out
+        # fixed working width (also upscales 144p/240p) so adaptive-bitrate switches keep the model
+        s = self.p["work_w"] / float(W)
+        wsz = (int(self.p["work_w"]), max(8, int(round(H * s))))
+        small = cv2.resize(img, wsz, interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_LINEAR)
         h, w = small.shape[:2]
         sx, sy = w / float(W), h / float(H)
+        if self._shape is not None and self._shape != (H, W):
+            log.info("scene: source size %s -> %s; fast re-adaptation", self._shape, (H, W))
+            for m in self.models.values():
+                m.fast = max(m.fast, int(self.p["warmup_frames"]))
+        self._shape = (H, W)
         self._history.append((frame.real_ts, frame.capture_ts, frame.id))
 
         # ---- regime (day / IR) with hysteresis
@@ -304,10 +363,11 @@ class SceneChangeAnalyzer(Analyzer):
                 self._mode_votes = 0
                 m = self.models[want]
                 m.fast = self.p["warmup_frames"]
-                prev_ts = self._history[-self.p["mode_hysteresis"] - 1][0] if len(self._history) > self.p["mode_hysteresis"] else None
-                onset = self._history[-self.p["mode_hysteresis"]][0]
+                k = min(int(self.p["mode_hysteresis"]), len(self._history))
+                prev_ts = self._history[-k - 1][0] if len(self._history) > k else None
+                onset, onset_cap = self._history[-k][0], self._history[-k][1]
                 out.append(Observation(kind="ir_mode_switch", ts=onset, analyzer=self.name, confidence=0.8,
-                                       frame_id=frame.id, ts_capture=frame.capture_ts,
+                                       frame_id=frame.id, ts_capture=onset_cap,
                                        value={"to_ir": want == "ir", "from": prev, "to": want,
                                               "onset_window": [iso(prev_ts) if prev_ts else None, iso(onset)],
                                               "detected_ts": iso(frame.real_ts)}))
@@ -348,7 +408,7 @@ class SceneChangeAnalyzer(Analyzer):
         changed = cv2.morphologyEx(changed, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
         changed = cv2.morphologyEx(changed, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
         chg = changed.astype(bool)
-        excl = self._exclusion(ctx, frame, h, w, sx, sy, model)
+        excl, excl_person = self._exclusion(ctx, frame, h, w, sx, sy, model)
         valid = ~excl
         frac = float(chg[valid].mean()) if valid.any() else 0.0
 
@@ -359,7 +419,9 @@ class SceneChangeAnalyzer(Analyzer):
             a = max(0.5, 1.0 / (model.n + 1)) if warm else 0.5
             amap = np.full(chg.shape, a, np.float32)
         else:
-            amap = np.where(chg, self.p["alpha"] * self.p["fg_alpha_factor"], self.p["alpha"]).astype(np.float32)
+            # selective update, except where a person is (sticky-excluded): learn her at the normal rate
+            amap = np.where(chg & ~excl_person, self.p["alpha"] * self.p["fg_alpha_factor"],
+                            self.p["alpha"]).astype(np.float32)
         a3 = amap[..., None]
         d = F - model.mean
         model.mean += a3 * d
@@ -392,7 +454,7 @@ class SceneChangeAnalyzer(Analyzer):
                 continue
             comp = lab == i
             bbox_w = (int(x), int(y), int(x + bw), int(y + bh))
-            obs = self._report(frame, ctx, model, F, comp, bbox_w, sx, sy)
+            obs = self._report(frame, img, model, F, comp, bbox_w, sx, sy)
             # absorb into the background so it is reported once
             model.mean[comp] = F[comp]
             model.var[comp] = 0
@@ -401,9 +463,10 @@ class SceneChangeAnalyzer(Analyzer):
                 new_objs.append(obs)
         if new_objs:
             out += new_objs
-            out.append(Observation(kind="scene_change", ts=new_objs[0].ts, analyzer=self.name,
+            first = min(new_objs, key=lambda o: o.ts)
+            out.append(Observation(kind="scene_change", ts=first.ts, analyzer=self.name,
                                    confidence=float(max(o.confidence for o in new_objs)), frame_id=frame.id,
-                                   ts_capture=frame.capture_ts,
+                                   ts_capture=first.ts_capture,
                                    value={"score": round(frac, 4), "bbox_list": [o.value["bbox"] for o in new_objs],
                                           "labels": [o.value["label"] for o in new_objs], "global": False,
                                           "ir_mode": self.mode == "ir", "detected_ts": iso(frame.real_ts)}))
@@ -420,8 +483,8 @@ class SceneChangeAnalyzer(Analyzer):
                            ts_capture=frame.capture_ts, value=value)
 
     # ------------------------------------------------------------------ classification / report
-    def _report(self, frame, ctx, model: _Model, F, comp, bbox_w, sx, sy):
-        H, W = frame.image.shape[:2]
+    def _report(self, frame, img, model: _Model, F, comp, bbox_w, sx, sy):
+        H, W = img.shape[:2]
         x0, y0, x1, y1 = bbox_w
         fb = [int(x0 / sx), int(y0 / sy), int(min(W, np.ceil(x1 / sx))), int(min(H, np.ceil(y1 / sy)))]
         now = frame.real_ts
@@ -465,7 +528,7 @@ class SceneChangeAnalyzer(Analyzer):
             if e_now < 0.6 * e_bg and c_now <= c_bg:
                 appeared = False            # smoother + less colourful than before: something went away
 
-        crop = frame.image[fb[1]:fb[3], fb[0]:fb[2]]
+        crop = img[fb[1]:fb[3], fb[0]:fb[2]]
         cmask = cv2.resize(comp[y0:y1, x0:x1].astype(np.uint8), (crop.shape[1], crop.shape[0]),
                            interpolation=cv2.INTER_NEAREST).astype(bool) if crop.size else np.zeros(0, bool)
         label, conf, extra = self._classify(crop, cmask, fb, H, W)

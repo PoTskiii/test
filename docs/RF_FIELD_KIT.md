@@ -28,8 +28,8 @@ beacon's SSID/BSSID/channel, and raw received power vs. frequency. It does **not
 - transmit anything (no jamming, no deauth, no active probing).
 
 Do not connect to a network you find, even an open one. Do not attempt to decode
-the video/telemetry. If you locate the crew's link, that is a *map hint*, not an
-invitation to touch their gear.
+the video/telemetry. If you locate the stream link, that is a *map hint*, not an
+invitation to touch the equipment.
 
 **Physical safety.** It is hunting season (elg/rådyr). Wear **high-visibility
 clothing**, make noise, and stay off active hunting ground. Much of the likely
@@ -72,9 +72,11 @@ Two realistic uplinks out of a forest:
   | B7   | 2500–2570    | LTE    | **no** |
   | n78  | 3400–3800    | NR TDD | **no** (and TDD ⇒ bursty by design) |
 
-### Crew camp / vehicle
-Phones, a personal hotspot, a **GoPro/DJI camera AP**, Bluetooth. A cluster of
-these near a hotspot is itself a strong hint that people are stationed there.
+### Out of scope: people and their devices
+This kit only looks for the *stream equipment* (Starlink router, field cellular
+router, camera access point). It does not tag, follow or locate anyone's phone,
+hotspot, Bluetooth device or vehicle — not the crew's, not other searchers'.
+If a signal turns out to be a person's device, ignore it.
 
 ---
 
@@ -165,7 +167,6 @@ to the foxhunt tool — enter *true* bearings).
   700/800 MHz reaches furthest. Expect the carrier to *fade in and out* with
   terrain as you drive — the **steadiness over time at one spot** is the
   discriminator, not the absolute level.
-- **Bluetooth** (camp): ~10–30 m; only useful once you're basically there.
 
 ---
 

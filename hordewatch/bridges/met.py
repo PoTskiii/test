@@ -48,6 +48,12 @@ reliabilities (0.2-0.5); layers of one weather family and day (rain_visual +
 audio_rain, cloud_fraction + direct_sun, fog + condensation) share an
 independence group, because they are compared against the same model errors.
 
+Operation: the bridge rebuilds a (kind, day) layer when that day's observation count
+changes; the lookback starts at a local midnight so a day is always scored from all
+of its rows; downloads and scoring run in a worker thread (``async``), because a slow
+THREDDS server must not stall the runner's frame/audio loop. Model units come from
+the CF ``units`` attribute when present (value-range guesses are only a fallback).
+
 Failure modes: the analysis smooths convective showers (the tolerances and the
 floors handle it); the box interior differs from the air outside (temperature
 weight low); looped audio (audio_rain near an audio_loop is ignored); overlap
@@ -71,12 +77,12 @@ import numpy as np
 from scipy.ndimage import maximum_filter, minimum_filter
 
 from hordejakt import DEFAULTNO
-from hordejakt.grid import GRID, Grid
+from hordejakt.grid import Grid
 
 from ..analyzers.base import Analyzer
-from ..types import Observation
-from .common import (RateLimitedLog, cache_dir, from_unix, layers_dir, load_state, local_date, save_state, setting,
-                     sub_grid, to_unix, upsample, write_layer)
+from ..types import UTC, Observation
+from .common import (OSLO, RateLimitedLog, cache_dir, from_unix, layers_dir, load_state, local_date, save_state,
+                     setting, sub_grid, to_unix, upsample, write_layer)
 
 log = logging.getLogger("hordewatch.bridges.met")
 warn_once = RateLimitedLog(900)
@@ -521,6 +527,23 @@ def cf_times(values, units):
     return ref + np.asarray(values, float) * scale
 
 
+def to_standard_units(ours, arr, units):
+    """Convert a model field to the bridge's units (mm/h, fraction 0-1, deg C, % RH) using the
+    CF ``units`` attribute. Returns ``arr`` unchanged when the units are missing or already
+    standard, so the converters in var_map (value-range heuristics) only act as a fallback --
+    a heuristic alone cannot tell a clear hour in % (max <= 1.5) from an overcast one in 0-1."""
+    u = (units.decode() if isinstance(units, bytes) else str(units or "")).strip().lower()
+    if not u:
+        return arr
+    if ours == "cloud_fraction" and u in ("%", "percent"):
+        return arr / 100.0
+    if ours == "relative_humidity" and u in ("1", "fraction", "0-1"):
+        return arr * 100.0
+    if ours == "air_temperature_c" and u in ("k", "kelvin"):
+        return arr - 273.15
+    return arr
+
+
 def fields_from_netcdf3(data, var_map, grid, product, validity, regrid_cache=None):
     """Read a netCDF-3 subset: var_map {nc_var: (our_var, converter)}; validity(t_unix, our_var) -> (t0, t1)."""
     nc = _read_netcdf3(data)
@@ -536,6 +559,7 @@ def fields_from_netcdf3(data, var_map, grid, product, validity, regrid_cache=Non
                 continue
             var = v[ncv]
             arr = np.ma.filled(np.ma.asarray(var[:], dtype=float), np.nan)
+            arr = to_standard_units(ours, arr, getattr(var, "units", None))
             dims = var.dimensions
             gm = getattr(var, "grid_mapping", b"")
             gm = gm.decode() if isinstance(gm, bytes) else gm
@@ -573,10 +597,12 @@ def fields_from_netcdf3(data, var_map, grid, product, validity, regrid_cache=Non
 class MetNordicProvider(MetProvider):
     """MET Nordic analysis (1 km, hourly) from thredds.met.no; see module docstring."""
     name = "met_nordic"
+    # converters run after to_standard_units (CF units attribute); the value-range tests only
+    # matter when a subset arrives without units
     VARS = {"precipitation_amount": ("precip_rate_mmh", lambda a: np.maximum(a, 0.0)),
             "cloud_area_fraction": ("cloud_fraction", lambda a: np.clip(a / (100.0 if np.nanmax(a) > 1.5 else 1.0), 0, 1)),
             "air_temperature_2m": ("air_temperature_c", lambda a: a - 273.15 if np.nanmean(a) > 150 else a),
-            "relative_humidity_2m": ("relative_humidity", lambda a: a * 100.0 if np.nanmax(a) <= 1.5 else a)}
+            "relative_humidity_2m": ("relative_humidity", lambda a: np.clip(a * 100.0 if np.nanmax(a) <= 1.5 else a, 0, 100))}
     FILE = "met_analysis_1_0km_nordic_{Y}{m}{d}T{H}Z.nc"
 
     def __init__(self, cache_root, thredds=None, stride=1, bbox=(57.9, 64.6, 4.4, 13.6)):
@@ -871,7 +897,7 @@ def score_kind_day(kind, rows, providers, grid: Grid):
     total, n, prods = None, 0, set()
     for s in aggregate_hourly(kind, rows):
         ll, p = score_hour(kind, s, get_field, grid)
-        if ll is None:
+        if ll is None or not np.isfinite(ll).any():   # no product, or e.g. sun below 3 deg everywhere
             continue
         prods |= set(p)
         total = ll if total is None else np.where(np.isnan(total), ll, np.where(np.isnan(ll), total, total + ll))
@@ -887,7 +913,8 @@ class WeatherBridge(Analyzer):
 
     Config: providers (default ["met_nordic", "radar", "frost"]; "defaultno_met" fixture;
     objects allowed), frost_client_id, lookback_days (3), met_grid (Grid, default MET_GRID),
-    nordic_stride (1), recompute_s (1800: re-try days whose model hours were missing).
+    nordic_stride (1), recompute_s (1800: re-try days whose model hours were missing),
+    async (True: downloads + scoring in a worker thread; results are collected on a later tick).
     """
     name = "weather_bridge"
     tick_interval_s = 900.0
@@ -924,8 +951,14 @@ class WeatherBridge(Analyzer):
         return out
 
     def rows_by_day(self, db, now=None):
+        """Weather rows grouped by (kind, local date). The lookback starts at a local
+        midnight, so every day it returns is complete: a day that slides out of the
+        window disappears entirely (its last full layer stays on disk) instead of being
+        rebuilt from its remaining tail, which would silently weaken that day's layer."""
         now = time.time() if now is None else now
-        since = from_unix(now - float(setting(self.config, "lookback_days", 3)) * 86400)
+        days = min(float(setting(self.config, "lookback_days", 3)), 3650.0)
+        start = (from_unix(now).astimezone(OSLO) - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+        since = start.astimezone(UTC)
         rows = db.observations(kind=list(KINDS), since=since)
         loops = [to_unix(r["ts"]) for r in db.observations(kind="audio_loop", since=since)]
         groups = {}
@@ -958,31 +991,67 @@ class WeatherBridge(Analyzer):
         info["frac_consistent"] = float(info["consistent_cells"] / max(fin.sum(), 1))
         return fine, info
 
-    def on_tick(self, ctx):
-        state = load_state(ctx.db, self.name, {"days": {}})
-        now = time.time()
-        out = []
-        for (kind, date), rows in sorted(self.rows_by_day(ctx.db, now).items()):
-            key = f"{kind}:{date}"
-            prev = state["days"].get(key, {})
-            fresh = prev.get("n_obs") == len(rows)
-            retry = prev.get("missing") and now - prev.get("t", 0) > float(setting(self.config, "recompute_s", 1800))
-            if fresh and not retry:
-                continue
+    def _build_jobs(self, jobs, now):
+        """Rebuild [(kind, date, rows)] -> [(kind, date, rows, info | None, error | None)].
+        Pure w.r.t. the DB, so it can run in the worker thread (downloads happen here)."""
+        res = []
+        for kind, date, rows in jobs:
             try:
                 _, info = self.build_day(kind, date, rows)
+                res.append((kind, date, rows, info, None))
             except Exception as e:
-                log.exception("weather layer %s failed: %s", key, e)
+                log.exception("weather layer %s:%s failed: %s", kind, date, e)
+                res.append((kind, date, rows, None, str(e)))
+        return res
+
+    def _finish_jobs(self, state, results, t_done):
+        out = []
+        for kind, date, rows, info, err in results:
+            if info is None:
                 continue
             n_hours_obs = len({_hour_key(to_unix(r["ts"])) for r in rows})
-            state["days"][key] = {"n_obs": len(rows), "t": now, "hours": info.get("hours", 0),
-                                  "missing": info.get("hours", 0) < n_hours_obs}
+            state["days"][f"{kind}:{date}"] = {"n_obs": len(rows), "t": t_done, "hours": info.get("hours", 0),
+                                               "missing": info.get("hours", 0) < n_hours_obs}
             if info.get("hours"):
                 ts = max(r["ts"] for r in rows)
-                out.append(Observation("weather_match", ts, {"product": ",".join(info.get("products", [])), "cells": info["consistent_cells"],
-                                                             "kind": kind, "date": date, "hours": info["hours"],
+                out.append(Observation("weather_match", ts, {"product": ",".join(info.get("products", [])),
+                                                             "cells": info["consistent_cells"], "kind": kind, "date": date,
+                                                             "hours": info["hours"],
                                                              "frac_consistent": round(info["frac_consistent"], 3),
                                                              "layer": info.get("path")},
                                        analyzer=self.name, confidence=RELIABILITY[kind]))
+        return out
+
+    def on_tick(self, ctx):
+        """Collect a finished rebuild, then queue the (kind, date) layers whose observations
+        changed (or whose model hours were missing, after recompute_s). The rebuild --
+        THREDDS / Frost downloads of several hourly fields -- runs in a single worker
+        thread (config ``async``, default True): the Analyzer contract forbids blocking
+        the runner's frame/audio loop for more than a few seconds."""
+        state = load_state(ctx.db, self.name, {"days": {}})
+        now = time.time()
+        out = []
+        fut = getattr(self, "_future", None)
+        if fut is not None and fut.done():
+            self._future = None
+            try:
+                out += self._finish_jobs(state, fut.result(), now)
+            except Exception as e:
+                log.exception("weather rebuild failed: %s", e)
+        if getattr(self, "_future", None) is None:
+            jobs = []
+            for (kind, date), rows in sorted(self.rows_by_day(ctx.db, now).items()):
+                prev = state["days"].get(f"{kind}:{date}", {})
+                fresh = prev.get("n_obs") == len(rows)
+                retry = prev.get("missing") and now - prev.get("t", 0) > float(setting(self.config, "recompute_s", 1800))
+                if not fresh or retry:
+                    jobs.append((kind, date, rows))
+            if jobs and setting(self.config, "async", True):
+                if getattr(self, "_pool", None) is None:
+                    from concurrent.futures import ThreadPoolExecutor
+                    self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="weather-bridge")
+                self._future = self._pool.submit(self._build_jobs, jobs, now)
+            elif jobs:
+                out += self._finish_jobs(state, self._build_jobs(jobs, now), now)
         save_state(ctx.db, self.name, state)
         return out

@@ -3,7 +3,7 @@
 Cross-platform, **receive-only** WiFi scanner. It never associates with, probes,
 or transmits to any network: it reads the beacons every access point already
 broadcasts to the air (SSID, BSSID, channel, RSSI), tags the ones that look like
-the box's uplink or a nearby crew camp, logs each observation with a GPS fix to
+the box's uplink equipment, logs each observation with a GPS fix to
 CSV, tells you whether a chosen AP is getting *warmer or colder* as you walk, and
 - once you have samples from a few spots - estimates the transmitter location by
 RSSI multilateration (via :mod:`hordewatch.rf.foxhunt`).
@@ -18,7 +18,12 @@ WiFi you can hear:
 * Field 4G/5G routers (Teltonika RUTx, Peplink/Pepwave, Huawei, generic MiFi)
   broadcast management SSIDs like ``RUT…``, ``Teltonika…``, ``Pepwave_…``,
   ``HUAWEI-…``.
-* A crew camp/vehicle leaks phones, a GoPro/DJI camera AP, a personal hotspot.
+* The stream camera itself may run a GoPro/DJI-style camera access point.
+
+Deliberately NOT supported: flagging or tracking personal devices (phone
+hotspots, people's laptops/wearables) or people/vehicles. Only equipment that
+can carry the stream (Starlink, field cellular routers, camera APs) is tagged;
+everything else is logged anonymously as "other" and never singled out.
 2.4 GHz beacons carry ~50-200 m through forest (much less than open air, more
 than 5 GHz); so a hit at all means you are close.
 
@@ -73,9 +78,7 @@ _SSID_RULES = [
     ("camera:gopro", re.compile(r"\bgopro", re.I)),
     ("camera:dji", re.compile(r"\b(dji|osmo|mavic|mini\s?\d)", re.I)),
     ("camera:insta360", re.compile(r"insta360", re.I)),
-    ("phone_hotspot", re.compile(r"\b(iphone|androidap|galaxy|samsung|pixel)\b", re.I)),
     ("horde", re.compile(r"horde", re.I)),
-    ("crew_hint", re.compile(r"\b(nrk|produksjon|crew|camp|regi|opptak)\b", re.I)),
 ]
 
 # BSSID OUI prefixes (upper-case, ':' separated first three octets) -> label.

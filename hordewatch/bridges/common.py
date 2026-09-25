@@ -107,17 +107,71 @@ def stamp(ts) -> str:
     return from_unix(to_unix(ts)).strftime("%Y%m%dT%H%M%SZ")
 
 
-def capture_time(obs: dict, clock=None, default_latency_s: float = 30.0) -> float:
-    """Unix capture (stream) time of an observation row from DB.observations().
+def capture_time(obs: dict, clock=None, default_latency_s: float = 30.0, latency: float | None = None) -> float:
+    """Unix capture (stream) time of the *phenomenon* of an observation row from DB.observations().
 
-    Observation.ts is the *estimated real* time = capture - latency used by the
-    analyzer. Bridges that do their own latency modelling need the capture
-    time: take ``ts_capture`` when present, otherwise undo the clock latency.
+    Observation.ts is the estimated real time of the phenomenon = its capture time
+    minus the latency the analyzer used, so capture = ts + latency_used. Pass
+    ``latency`` (from :func:`observation_latencies`) whenever a DB is available.
+
+    ``ts_capture`` is NOT a safe substitute in general: it is the capture time of
+    the frame the observation was *emitted* on, which for some analyzers is not
+    the frame of the phenomenon (gesture 'summary' rows carry the onset ts but the
+    end-of-episode frame; aircraft_light carries the first track point's ts but
+    the frame that closed the track, tens of seconds later). Without ``latency``
+    the order is: value['latency_s'] (analyzer-reported), ts_capture, clock.
     """
+    if latency is not None:
+        return to_unix(obs["ts"]) + float(latency)
+    v = obs.get("value") if isinstance(obs.get("value"), dict) else {}
+    if isinstance(v.get("latency_s"), (int, float)) and np.isfinite(v["latency_s"]):
+        return to_unix(obs["ts"]) + float(v["latency_s"])
     if obs.get("ts_capture") is not None:
         return to_unix(obs["ts_capture"])
     lat = getattr(clock, "latency_s", None)
     return to_unix(obs["ts"]) + float(default_latency_s if lat is None else lat)
+
+
+def observation_latencies(db, rows, clock=None, default_latency_s: float = 30.0) -> list:
+    """Stream latency (s) the producing analyzer used for each observation row,
+    i.e. capture - real of the frame / audio chunk the row references.
+
+    Order of preference per row: the referenced frame (``frame_id``) or audio chunk
+    (``audio_id``) in the DB (capture_ts - real_ts: exactly what the analyzer's
+    real times were derived from, also after a later re-calibration of the clock);
+    ``value['latency_s']``; ``ts_capture - ts`` (rows without a frame/audio
+    reference, e.g. manual entries); the clock's current latency; the default.
+    """
+    fmap, amap = {}, {}
+    con = getattr(db, "con", None)
+    for table, key, out in (("frames", "frame_id", fmap), ("audio", "audio_id", amap)):
+        ids = sorted({int(r[key]) for r in rows if r.get(key) is not None})
+        if con is None or not ids:
+            continue
+        try:
+            for k in range(0, len(ids), 500):
+                chunk = ids[k:k + 500]
+                q = f"SELECT id, capture_ts, real_ts FROM {table} WHERE id IN ({','.join('?' * len(chunk))})"
+                for i, c, r in con.execute(q, chunk):
+                    if c and r:
+                        out[int(i)] = to_unix(c) - to_unix(r)
+        except Exception as e:  # never let a lookup failure stop a bridge
+            log.debug("latency lookup in %s failed: %s", table, e)
+    clat = getattr(clock, "latency_s", None)
+    res = []
+    for r in rows:
+        v = r.get("value") if isinstance(r.get("value"), dict) else {}
+        if r.get("frame_id") is not None and int(r["frame_id"]) in fmap:
+            res.append(fmap[int(r["frame_id"])])
+        elif r.get("audio_id") is not None and int(r["audio_id"]) in amap:
+            res.append(amap[int(r["audio_id"])])
+        elif isinstance(v.get("latency_s"), (int, float)) and np.isfinite(v["latency_s"]):
+            res.append(float(v["latency_s"]))
+        elif r.get("ts_capture") is not None:
+            res.append(to_unix(r["ts_capture"]) - to_unix(r["ts"]))
+        else:
+            res.append(float(default_latency_s if clat is None else clat))
+    return res
 
 
 # --------------------------------------------------------------------------- grids

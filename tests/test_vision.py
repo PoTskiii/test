@@ -622,8 +622,15 @@ def test_vlm_lazy_connect_retries(mock_vlm_server):
     assert an.on_frame(mk_frame(0, noisy(forest(), np.random.default_rng(0))), ctx) == []
     assert "whiteboard" not in ctx.triggers and _MockVLM.requests == []
     an.client.url = mock_vlm_server                  # server comes up
-    ctx.trigger("whiteboard")
+    # the re-ping runs on a background thread (on_frame never waits on the network); wait for it
     an.on_frame(mk_frame(1, noisy(forest(), np.random.default_rng(1))), ctx)
+    for _ in range(200):
+        if an._connected:
+            break
+        time.sleep(0.02)
+    assert an._connected
+    ctx.trigger("whiteboard")
+    an.on_frame(mk_frame(2, noisy(forest(), np.random.default_rng(2))), ctx)
     assert an.flush(10)
     assert [o.kind for o in an.on_tick(ctx)].count("whiteboard_text") == 1
     an.close()
@@ -636,3 +643,448 @@ def test_runner_loads_vision_analyzers(caplog):
            "vlm": {"backend": "ollama", "url": f"http://127.0.0.1:{socket_free_port()}", "model": "llava:7b"}}
     got = load_analyzers(cfg, logging.getLogger("test"))
     assert [a.name for a in got] == ["whiteboard", "scene", "gesture"]      # VLM server absent -> disabled
+
+
+# =================================================================================== adversarial review tests
+# Each test below pins a defect found in review (it failed on the original implementation).
+
+def _read(text, conf=0.9):
+    lines = [wb.OcrLine(text=t, conf=conf, y=(k + 0.5) / 3, raw=t) for k, t in enumerate(text.split("\n"))]
+    return wb.BoardRead(lines=lines, conf=conf, engine="rapidocr", variant="clahe")
+
+
+def _scripted_ocr(monkeypatch, reads):
+    """Replace the OCR engine by a script of reads (None = nothing legible); returns the call log."""
+    calls = []
+    it = iter(reads)
+
+    def fake_read_board(crop, rapid=None, tess=None, good_conf=0.85):
+        calls.append(crop.shape)
+        return next(it, None)
+
+    monkeypatch.setattr(wb, "read_board", fake_read_board)
+    monkeypatch.setattr(wb, "get_rapidocr", lambda threads=2: object())
+    monkeypatch.setattr(wb, "get_tesseract", lambda: None)
+    return calls
+
+
+FULL = "INGEN STIER\nKAMERA 41 ØST"
+
+
+@pytest.mark.parametrize("script, expect_texts", [
+    # a hand covers the lower line for one frame: the partial read must not start a new board
+    ([FULL, FULL, "INGEN", FULL, FULL], [FULL]),
+    # a single garbage read (glare) in the middle is discarded, not announced
+    ([FULL, FULL, "XQZW PLMK", FULL, FULL], [FULL]),
+    # a garbage FIRST read followed by the real board: the abandoned single-read instance is dropped
+    (["XQZW PLMK", FULL, FULL, FULL, FULL], [FULL]),
+    # she really flips the board (two agreeing reads of new text): two boards, two events
+    ([FULL, FULL, "SOL I SØR\nKL 14:30", "SOL I SØR\nKL 14:30", "SOL I SØR\nKL 14:30"],
+     [FULL, "SOL I SØR\nKL 14:30"]),
+])
+def test_whiteboard_odd_read_does_not_split_board(monkeypatch, tmp_path, script, expect_texts):
+    _scripted_ocr(monkeypatch, [_read(t) for t in script])
+    db = DB(tmp_path / "w.sqlite")
+    ctx = mk_ctx(db)
+    an = wb.WhiteboardAnalyzer({"thumb_change": -1})             # read every frame
+    rng = np.random.default_rng(21)
+    base = forest(6)
+    imgs = [place_board(noisy(base, rng), board_img())[0] for _ in range(len(script))] + [noisy(base, rng)] * 3
+    frames = [mk_frame(i, im, db) for i, im in enumerate(imgs)]
+    obs = run_frames(an, ctx, frames, db)
+    texts = [o.value["text"] for _, o in obs if o.kind == "whiteboard_text"]
+    assert texts == expect_texts
+    assert [e[0] for e in events(db)] == ["whiteboard_text"] * len(expect_texts)
+    if len(expect_texts) == 2:          # the new board is stamped with the first frame showing its text
+        second = [o for _, o in obs if o.kind == "whiteboard_text"][1]
+        assert second.ts == frames[2].real_ts and second.ts_capture == frames[2].capture_ts
+
+
+def test_whiteboard_ocr_gate_ignores_light_change_but_rereads_new_writing(monkeypatch):
+    """The re-read gate compared raw thumbnails: a 40 % exposure drop forced a re-OCR (~1 s CPU) while new
+    writing on the held board (mean change ~9 grey levels < 12) was not re-read."""
+    calls = _scripted_ocr(monkeypatch, [_read(FULL) for _ in range(20)])
+    an = wb.WhiteboardAnalyzer({})
+    ctx = mk_ctx(None)
+    rng = np.random.default_rng(22)
+    base = forest(6)
+    a = lambda: place_board(noisy(base, rng), board_img())[0]                                     # noqa: E731
+    dark = lambda: np.clip(a().astype(np.float32) * 0.6, 0, 255).astype(np.uint8)                 # noqa: E731
+    b = lambda: place_board(noisy(base, rng), board_img(("SOL I SOR", "KL 14:30")))[0]            # noqa: E731
+    seq = [a(), a(), dark(), dark(), a(), b()]
+    n_calls = []
+    for i, im in enumerate(seq):
+        an.on_frame(mk_frame(i, im), ctx)
+        n_calls.append(len(calls))
+    assert n_calls[1] == 2                      # read until two reads agree (emitted)
+    assert n_calls[4] == 2, n_calls             # exposure change / same board: no re-read
+    assert n_calls[5] == 3, n_calls             # new writing on the held board: re-read at once
+
+
+def test_whiteboard_long_hold_bounded_cpu(monkeypatch):
+    """A board (or white fixture) visible for hours with OCR re-reads: reads per instance are capped, so the
+    quadratic merge stays cheap (200 reads took 3.6 s per frame before)."""
+    rng_t = np.random.default_rng(23)
+
+    def noisy_read(k):
+        t = list(FULL)
+        for _ in range(int(rng_t.integers(0, 3))):
+            t[int(rng_t.integers(0, len(t)))] = "ABCDEFGH0123"[int(rng_t.integers(0, 12))]
+        return _read("".join(t), conf=float(rng_t.uniform(0.6, 0.95)))
+
+    _scripted_ocr(monkeypatch, [noisy_read(k) for k in range(400)])
+    an = wb.WhiteboardAnalyzer({"thumb_change": -1, "max_reads": 16})
+    ctx = mk_ctx(None)
+    rng = np.random.default_rng(24)
+    img = place_board(noisy(forest(6), rng), board_img())[0]
+    small = cv2.resize(img, (640, 360), interpolation=cv2.INTER_AREA)       # fast detection
+    worst = 0.0
+    for i in range(36):
+        t = time.perf_counter()
+        an.on_frame(mk_frame(i, small), ctx)
+        worst = max(worst, time.perf_counter() - t)
+    assert len(an._track.inst.reads) <= 16
+    assert worst < 1.0, worst
+    m = wb.merge_reads(an._track.inst.reads)
+    assert wb.board_similarity(m["text"], FULL) > 0.85
+
+
+@pytest.mark.parametrize("gains", [(1.0, 0.86, 0.66), (1.0, 0.75, 0.50)])     # ~3500 K and ~2500 K sun
+def test_whiteboard_detected_in_warm_low_sun_without_false_positives(gains):
+    """Late-September sun at 60 N is low most of the day: a white board lit by it is orange (HSV S 86-127)
+    and was rejected by the fixed s_max=75 test."""
+    rng = np.random.default_rng(25)
+    g = np.array(gains, np.float32) * 1.08
+    img, corners = place_board(noisy(forest(3), rng), board_img(), width=220, tilt_deg=-12)
+    img = np.clip(img.astype(np.float32) * g, 0, 255).astype(np.uint8)
+    c = wb.detect_boards(img)
+    assert c, "warm-lit board not detected"
+    xs, ys = corners[:, 0], corners[:, 1]
+    assert wb.bbox_iou(c[0].bbox, (xs.min(), ys.min(), xs.max(), ys.max())) > 0.7
+    # the balance must not turn a sunlit yellow patch (the brightest thing in view) into a 'board'
+    for seed in range(4):
+        f = noisy(forest(seed), rng).astype(np.float32)
+        cv2.ellipse(f, (400 + 60 * seed, 560), (90, 40), 10, 0, 360, (220, 200, 120), -1)
+        cv2.rectangle(f, (900, 500), (1060, 580), (225, 205, 110), -1)          # sunlit straw bale side
+        f = np.clip(f * g, 0, 255).astype(np.uint8)
+        assert wb.detect_boards(f) == []
+
+
+class _HangingServer:
+    """Accepts TCP connections (kernel backlog) but never answers: a hung/overloaded Ollama."""
+
+    def __enter__(self):
+        import socket
+        self.s = socket.socket()
+        self.s.bind(("127.0.0.1", 0))
+        self.s.listen(16)
+        return f"http://127.0.0.1:{self.s.getsockname()[1]}"
+
+    def __exit__(self, *a):
+        self.s.close()
+
+
+def test_vlm_nonblocking_reping_and_aircraft_pulse_expires():
+    with _HangingServer() as url:
+        an = vlm.VLMAnalyzer({"_global": {"vlm": {"url": url, "backend": "auto"}}, "lazy_connect": True,
+                              "reping_s": 0.0, "ping_timeout_s": 0.5, "scene_every_s": -1})
+        assert an.available() is True
+        ctx = mk_ctx(None)
+        img = noisy(forest(), np.random.default_rng(0))
+        worst = 0.0
+        for i in range(3):
+            t = time.perf_counter()
+            an.on_frame(mk_frame(i, img), ctx)
+            worst = max(worst, time.perf_counter() - t)
+        assert worst < 0.1, f"on_frame blocked {worst:.2f}s on a hung server (re-ping was synchronous)"
+    # a VLM 'pointing_up' answer raises aircraft_check; nothing consumes it, so it must be a pulse
+    an._connected = True
+    job = {"kind": "scene", "ts": T0, "ts_capture": T0 + timedelta(seconds=30), "frame_id": 1, "answer": "",
+           "parsed": {"sky": "clear", "pointing_up": True}}
+    kinds = [o.kind for o in an._to_observations(job, ctx)]
+    assert "gesture_point_up" in kinds and "aircraft_check" in ctx.triggers
+    for i in range(3, 20):                                     # 5 s frames: 85 s later
+        an.on_frame(mk_frame(i, img), ctx)
+    assert "aircraft_check" not in ctx.triggers, "trigger never expires -> runner forces every analyzer forever"
+    an.close()
+
+
+def test_vlm_board_answers_that_must_not_be_announced(tmp_path):
+    db = DB(tmp_path / "v.sqlite")
+    ctx = mk_ctx(db)
+    an = vlm.VLMAnalyzer({"_global": {"vlm": {"url": "http://127.0.0.1:9"}}})
+    f = mk_frame(0, np.zeros((72, 128, 3), np.uint8), db)
+
+    def board(answer, parsed):
+        return an._to_observations({"kind": "whiteboard", "ts": f.real_ts, "ts_capture": f.capture_ts,
+                                    "frame_id": f.id, "track_id": 7, "answer": answer, "parsed": parsed}, ctx)
+
+    # prose refusal (OpenAI-compatible backends do not enforce JSON)
+    out = board("I'm sorry, I cannot read the text in this image.", None)
+    assert not [o for o in out if o.kind == "whiteboard_text"]
+    # unreadable transcription
+    out = board('{"lines": ["???", "? ?"], "legible": true}', {"lines": ["???", "? ?"], "legible": True})
+    assert [o.value["is_new"] for o in out if o.kind == "whiteboard_text"] == [None]
+    # prose that is a plausible transcription: recorded with low confidence, never announced
+    out = board("INGEN STIER", None)
+    wt = [o for o in out if o.kind == "whiteboard_text"]
+    assert wt and wt[0].confidence <= 0.2 and wt[0].value["is_new"] is None
+    assert events(db) == []
+    # the OCR analyzer announced this board earlier in THIS run -> the VLM must not announce it again
+    from hordewatch.types import Observation
+    db.add_observation(Observation(kind="whiteboard_text", ts=f.real_ts, analyzer="whiteboard",
+                                   value={"text": FULL, "lines": FULL.split("\n")}))
+    out = board("", {"lines": ["INGEN STIER", "KAMERA 41 ØST"], "legible": True, "confidence": 0.9})
+    assert [o.value["is_new"] for o in out if o.kind == "whiteboard_text"] == [False]
+    assert events(db) == []
+    # bounded state over a multi-day run
+    for k in range(200):
+        ctx.state.setdefault("vlm_whiteboard", {})[1000 + k] = {"text": "x"}
+    board("", {"lines": ["NY TAVLE 7"], "legible": True, "confidence": 0.9})
+    assert len(ctx.state["vlm_whiteboard"]) <= 50
+
+
+def test_gesture_timestamps_pdt_latency_and_summary_pair():
+    """The summary row carried ts = onset but ts_capture = END frame (ADS-B bridge clusters on ts_capture:
+    a > 60 s episode became a second, wrong sighting), and latency_s was the clock's value instead of the
+    latency actually applied to the frame (PDT-measured)."""
+    an = gesture.GestureAnalyzer({})
+    ctx = mk_ctx(None)                                        # StreamClock says 30 s
+    rng = np.random.default_rng(26)
+    base = forest()
+    seq = ["bg"] * 6 + ["down"] * 2 + [("up", 30.0, "right")] * 16 + ["down"] * 3
+    obs = []
+    for i, what in enumerate(seq):
+        img = noisy(base, rng)
+        if what == "down":
+            stick_figure(img)
+        elif what != "bg":
+            stick_figure(img, arm="up", angle=what[1], side=what[2])
+        obs += an.on_frame(mk_frame(i, img, latency=12.0), ctx)       # ingest measured 12 s via HLS PDT
+    g = [o for o in obs if o.kind == "gesture_point_up"]
+    assert [o.value["phase"] for o in g] == ["onset", "summary"]
+    onset, summary = g
+    for o in g:
+        assert (o.ts_capture - o.ts).total_seconds() == pytest.approx(12.0)
+        assert o.value["latency_s"] == pytest.approx(12.0)
+    assert summary.ts == onset.ts and summary.ts_capture == onset.ts_capture
+    assert summary.value["duration_s"] >= 30
+
+
+def test_gesture_survives_stream_dropping_to_144p():
+    """The background ring buffer mixed frame sizes after an adaptive-bitrate drop: np.stack raised on every
+    frame and the detector stayed dead as long as the stream stayed at 144p."""
+    an = gesture.GestureAnalyzer({})
+    ctx = mk_ctx(None)
+    rng = np.random.default_rng(27)
+    base = forest()
+    for i in range(8):
+        an.on_frame(mk_frame(i, noisy(base, rng)), ctx)
+    got = []
+    for k, what in enumerate(["bg"] * 6 + ["down"] * 3 + ["up"] * 2):
+        img = noisy(base, rng)
+        if what == "down":
+            stick_figure(img)
+        elif what == "up":
+            stick_figure(img, arm="up", angle=30.0, side="right")
+        lo = cv2.resize(img, (256, 144), interpolation=cv2.INTER_AREA)
+        got += [(8 + k, o) for o in an.on_frame(mk_frame(8 + k, lo), ctx)]
+    on = [(i, o) for i, o in got if o.kind == "gesture_point_up"]
+    assert len(on) == 1 and on[0][0] == 17 and on[0][1].value["side"] == "right"
+    assert on[0][1].value["bbox"][2] <= 256                  # bbox in the 144p frame's own pixels
+
+
+def test_scene_timestamp_pairs_and_odd_frames():
+    """scene_change / ir_mode_switch had ts = onset but ts_capture = detection frame; grey 2-D frames crashed."""
+    an = scene.SceneChangeAnalyzer({})
+    ctx = mk_ctx(None)
+    rng = np.random.default_rng(28)
+    base = forest()
+    obs = []
+    for i in range(20):
+        img = noisy(base, rng)
+        if 6 <= i:
+            cv2.fillPoly(img, [arrow_poly(200, 560)], (125, 80, 40))
+        if i >= 12:
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)          # 2-D grey frame (IR, some decoders)
+        obs += [o for o in an.on_frame(mk_frame(i, img, latency=17.0), ctx)]
+    kinds = [o.kind for o in obs]
+    assert "object_appeared" in kinds and "scene_change" in kinds and "ir_mode_switch" in kinds
+    for o in obs:
+        assert (o.ts_capture - o.ts).total_seconds() == pytest.approx(17.0), (o.kind, o.ts, o.ts_capture)
+
+
+@pytest.mark.parametrize("img", [
+    np.full((720, 1280), 90, np.uint8),                                   # grey 2-D
+    np.full((720, 1280, 4), 90, np.uint8),                                # RGBA
+    np.random.default_rng(0).random((144, 256, 3)).astype(np.float32),   # float [0, 1]
+    np.zeros((5, 7, 3), np.uint8),                                        # degenerate
+    np.zeros((1, 1, 3), np.uint8),
+])
+def test_frame_analyzers_never_raise_on_odd_frames(img):
+    ctx = mk_ctx(None)
+    for an in (wb.WhiteboardAnalyzer({"ocr": False}), scene.SceneChangeAnalyzer({}), gesture.GestureAnalyzer({})):
+        for i in range(6):
+            assert isinstance(an.on_frame(mk_frame(i, img), ctx), list)
+
+
+def test_mediapipe_landmark_geometry_with_fake_landmarker():
+    """The MediaPipe path cannot run here (no model, no libEGL): exercise its landmark geometry with a fake
+    PoseLandmarker so a pointing arm / a resting arm are classified correctly."""
+    from types import SimpleNamespace as NS
+
+    def pose(wrist_r, elbow_r, vis=0.9):
+        pts = [(0.5, 0.2)] * 33                                  # everything at the head by default
+        pts = list(pts)
+        pts[11], pts[12] = (0.44, 0.35), (0.56, 0.35)            # shoulders (image left / right)
+        pts[13], pts[15] = (0.42, 0.5), (0.42, 0.62)             # left arm resting
+        pts[14], pts[16] = elbow_r, wrist_r
+        pts[23], pts[24] = (0.46, 0.7), (0.54, 0.7)
+        return [NS(x=x, y=y, visibility=vis) for x, y in pts]
+
+    class FakeLM:
+        def __init__(self, poses):
+            self.poses = poses
+
+        def detect(self, img):
+            return NS(pose_landmarks=self.poses)
+
+    mp_stub = NS(Image=lambda image_format, data: data, ImageFormat=NS(SRGB=1))
+    det = object.__new__(gesture.MediaPipePose)
+    det.mp, det.max_angle = mp_stub, 65.0
+    small = np.zeros((225, 400, 3), np.uint8)
+    # right arm straight up and 20 deg outwards
+    a = np.deg2rad(20)
+    sx, sy = 0.56 * 400, 0.35 * 225
+    wx, wy = sx + 100 * np.sin(a), sy - 100 * np.cos(a)
+    ex, ey = sx + 50 * np.sin(a), sy - 50 * np.cos(a)
+    det.lm = FakeLM([pose((wx / 400, wy / 225), (ex / 400, ey / 225))])
+    r = det.analyze(small, False)
+    assert r["pointing"] and r["side"] == "right" and abs(r["angle"] - 20) < 2 and r["hand_cue"]
+    assert r["n_persons"] == 1
+    det.lm = FakeLM([pose((0.58, 0.62), (0.58, 0.5))])          # right arm resting
+    assert det.analyze(small, False)["pointing"] is False
+    det.lm = FakeLM([pose((wx / 400, wy / 225), (ex / 400, ey / 225), vis=0.2)])   # occluded landmarks
+    assert det.analyze(small, False)["pointing"] is False
+    det.lm = FakeLM([])
+    r = det.analyze(small, False)
+    assert r["person"] is False and r["pointing"] is False
+
+
+def test_runner_end_to_end_replay_all_vision_analyzers(tmp_path):
+    """Replay an image sequence through runner.run with whiteboard + vlm (server absent) + scene + gesture:
+    DB serialisation of every value, consistent (ts, ts_capture) pairs, one announcement, and no false
+    'object' for the person (the gesture blob used to be the held-up board, and a person absorbed into the
+    gesture background used to lose her exclusion and be reported as a new blue object)."""
+    from hordewatch.runner import load_config, run
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    rng = np.random.default_rng(0)
+    base = forest(2)
+    seq = ["bg"] * 5 + ["down"] * 3 + ["board"] * 3 + ["down"] * 2 + ["up"] * 3 + ["down"] * 3 + ["arrow"] * 6
+    for i, what in enumerate(seq):
+        img = noisy(base, rng)
+        if what == "up":
+            stick_figure(img, cx=900, arm="up", angle=25.0, side="left")
+        elif what != "bg":
+            stick_figure(img, cx=900)
+        if what == "board":
+            img = place_board(img, board_img(), center=(560, 380), width=360)[0]
+        if what == "arrow":
+            cv2.fillPoly(img, [arrow_poly(150, 600)], (125, 80, 40))
+        cv2.imwrite(str(shots / f"f_{i:03d}.png"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+    cfg = load_config(None)
+    cfg.update(db=str(tmp_path / "hw.sqlite"), archive_dir=str(tmp_path / "arch"),
+               analyzers=["whiteboard", "vlm", "scene", "gesture"],
+               vlm={"backend": "ollama", "url": f"http://127.0.0.1:{socket_free_port()}", "model": "llava:7b"},
+               source={"type": "replay", "files": [str(shots)], "start_utc": "2026-09-22T18:00:00Z",
+                       "image_interval_s": 5.0, "frame_interval_s": 5.0, "latency_s": 25.0,
+                       "archive_every_n_frames": 0})
+    db = run(cfg)
+    obs = db.observations()
+    assert obs
+    for o in obs:
+        assert (o["ts_capture"] - o["ts"]).total_seconds() == pytest.approx(25.0), o
+    by = {}
+    for o in obs:
+        by.setdefault(o["kind"], []).append(o)
+    assert [o["value"]["is_new"] for o in by["whiteboard_text"]] == [True]
+    assert "KAMERA" in by["whiteboard_text"][0]["value"]["text"]
+    onset = [o for o in by["gesture_point_up"] if o["value"]["phase"] == "onset"]
+    assert len(onset) == 1 and onset[0]["value"]["side"] == "left"
+    assert abs(onset[0]["value"]["arm_angle_deg_from_vertical"] - 25) < 8
+    assert onset[0]["ts"] == datetime(2026, 9, 22, 18, 1, 5, tzinfo=timezone.utc) - timedelta(seconds=25)
+    assert [o["value"]["label"] for o in by.get("object_appeared", [])] == ["horde_sign"]
+    assert [e[0] for e in events(db)] == ["whiteboard_text"]
+
+
+def test_vlm_scene_objects_not_rereported_every_scene_prompt():
+    """LLaVA lists the same persistent things every 10 min: each listing used to become a new
+    object_appeared row (and hands_or_signs_near_box on every report while true)."""
+    an = vlm.VLMAnalyzer({"_global": {"vlm": {"url": "http://127.0.0.1:9"}}})
+    ctx = mk_ctx(None)
+
+    def scene_job(k, objects, near):
+        t = T0 + timedelta(minutes=10 * k)
+        return an._to_observations({"kind": "scene", "ts": t, "ts_capture": t + timedelta(seconds=30), "frame_id": k,
+                                    "answer": "", "parsed": {"sky": "overcast", "objects_new": objects,
+                                                             "hands_or_signs_near_box": near}}, ctx)
+
+    labels = lambda out: [o.value["label"] for o in out if o.kind == "object_appeared"]   # noqa: E731
+    assert labels(scene_job(0, ["wooden sign", "the box"], False)) == ["wooden sign", "the box"]
+    assert labels(scene_job(1, ["Wooden sign.", "the box"], True)) == ["hands_or_signs_near_box"]
+    assert labels(scene_job(2, ["wooden sign", "drone"], True)) == ["drone"]
+    assert labels(scene_job(3, [], False)) == []
+    assert labels(scene_job(4, [], True)) == ["hands_or_signs_near_box"]          # a new transition
+    assert labels(scene_job(30, ["wooden sign"], False)) == ["wooden sign"]      # 5 h later: re-reported
+
+
+def test_clock_seen_without_tz_database_after_dst_end(monkeypatch):
+    """Without a tz database (Windows without tzdata) the Oslo fallback was a fixed +2 h: after the last
+    Sunday of October a board saying 'KL 14:30' was mapped an hour wrong (capture_minus_shown_s ~3640 s)."""
+    import zoneinfo
+
+    def no_tz(key):
+        raise zoneinfo.ZoneInfoNotFoundError(key)
+
+    monkeypatch.setattr(zoneinfo, "ZoneInfo", no_tz)
+    an = wb.WhiteboardAnalyzer({"ocr": False})
+    for cap, expect in ((datetime(2026, 10, 26, 13, 30, 40, tzinfo=timezone.utc), 40.0),     # CET  (UTC+1)
+                        (datetime(2026, 10, 24, 12, 30, 40, tzinfo=timezone.utc), 40.0)):    # CEST (UTC+2)
+        obs = an._clock_obs("SOL I SØR\nKL 14:30", cap - timedelta(seconds=30), cap, None)
+        assert len(obs) == 1 and obs[0].value["capture_minus_shown_s"] == pytest.approx(expect)
+
+
+def test_pulse_triggers_expire_even_with_frozen_timestamps():
+    """A source that repeats one timestamp (image folder without times, stalled clock) must not leave a
+    pulse trigger set forever (the runner would force every analyzer on every frame)."""
+    ctx = mk_ctx(None)
+    wb.pulse_trigger(ctx, "aircraft_check", T0, 60.0, index=10)
+    ctx.trigger("unrelated")                                     # someone else's trigger: never touched
+    for i in range(11, 80):
+        wb.expire_pulses(ctx, T0, i)
+    assert ctx.triggers == {"unrelated"}
+    wb.pulse_trigger(ctx, "whiteboard", T0, 12.0, index=5)
+    wb.expire_pulses(ctx, T0 - timedelta(seconds=1), 6)           # replay restarted: time went backwards
+    assert "whiteboard" not in ctx.triggers
+
+
+def test_whiteboard_flip_confirmed_promptly_with_default_ocr_gate(monkeypatch, tmp_path):
+    """With the (default) appearance gate, the frame after a divergent read looks unchanged; the confirming
+    read must still happen at once, not ocr_stable_every_s (60 s) later."""
+    B = "SOL I SØR\nKL 14:30"
+    calls = _scripted_ocr(monkeypatch, [_read(FULL), _read(FULL), _read(B), _read(B), _read(B)])
+    db = DB(tmp_path / "f.sqlite")
+    ctx = mk_ctx(db)
+    an = wb.WhiteboardAnalyzer({})
+    rng = np.random.default_rng(29)
+    base = forest(6)
+    a = lambda: place_board(noisy(base, rng), board_img())[0]                                     # noqa: E731
+    b = lambda: place_board(noisy(base, rng), board_img(("SOL I SOR", "KL 14:30")))[0]            # noqa: E731
+    frames = [mk_frame(i, im, db) for i, im in enumerate([a(), a(), b(), b(), noisy(base, rng), noisy(base, rng)])]
+    out = run_frames(an, ctx, frames, db)
+    texts = [(i, o.value["text"]) for i, o in out if o.kind == "whiteboard_text"]
+    assert [t for _, t in texts] == [FULL, B]
+    assert texts[1][0] == 3, texts                     # confirmed on the 2nd frame of the flipped board
+    assert len(calls) == 4
+    assert len(events(db)) == 2

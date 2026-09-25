@@ -19,13 +19,23 @@ bilinearly upsampled to hordejakt.grid.GRID like hordejakt.layers.aircraft)
       P(event | x, D) = b + (1-b) [1 - prod_a (1 - q vis(elev_a(x, t_c - D)) g_a)]
   vis() is the soft canopy elevation threshold (logistic, mid 25 deg, scale 3 deg),
   elevations use the 4/3-earth refraction model of hordejakt.geo, the observer
-  stands at OBSERVER_M = 600 m a.s.l. D = latency + reaction delay (0-8 s), and
-  P(event | x) = sum_D w(D) P(event | x, D) with w from the latency prior
-  (calibrated N(mu, sigma) or uniform 15-60 s with 10 s Gaussian shoulders).
+  stands at OBSERVER_M = 600 m a.s.l. t_c is the capture time of the onset frame
+  and D = L + u with u in [-dwell, reaction + sampling gap]: she saw the aircraft
+  up to reaction_s (8 s) plus one frame gap before the onset frame, and kept
+  pointing at it (following it) for the episode duration ``dwell`` after it
+  (from the gesture 'summary' row, capped at 60 s). P(event | x) = sum_D w(D)
+  P(event | x, D) with w from the latency prior (calibrated N(mu, sigma) or
+  uniform 15-60 s with 10 s Gaussian shoulders).
   g_a is an optional pointing-direction factor: with the camera heading psi and
   an aircraft at azimuth A / elevation h, her arm appears tilted from vertical
   in the image by tau = atan2(cos h sin(A - psi), sin h) (negative = image left;
-  this reproduces the mk_bevis tilt_2129 table). g_a = (1-w) + w N(tau_obs; tau, 12 deg).
+  this reproduces the mk_bevis tilt_2129 table).
+      g_a = (1-w) + w [p N(tau; tau_obs, 12 deg) + (1-p) N(tau; -tau_obs, 12 deg)]
+  p is the probability that the *sign* of the observed tilt is right: the gesture
+  analyzer reports an unsigned angle plus a 'side' that, depending on the detector
+  path, is the tilt direction (arm-only path: tip vs. base, p = 0.9) or only the
+  side of the body the raised arm is on (MediaPipe / limb paths, p = 0.75); a
+  manually entered signed tilt gets p = 0.95.
 
 * Light in frame (aircraft_light, night). The pixel track is turned into
   azimuth/elevation with the fitted camera (heading 219.6 deg, pitch 0, f = 1068 px
@@ -46,22 +56,50 @@ bilinearly upsampled to hordejakt.grid.GRID like hordejakt.layers.aircraft)
       sigma_t = sqrt(4^2 + (0.3 s_cpa / v)^2) s.
   Audibility decreases with slant distance: P_aud(s) = 1 / (1 + exp((s - 16 km) / 2.5 km))
   (airliners at cruise are plausibly audible at 5-25 km slant in a quiet forest).
-      P(peak at t_obs | x) = b + (1-b) sum_L w(L) [1 - prod_a (1 - P_aud(s_a) exp(-(t_obs - L - t_peak_a)^2 / 2 sigma_t^2))]
+  Detected peaks at x form a Poisson process in stream time with rate
+      lambda(t | x, L) = b + sum_a P_aud(s_a) N(t; t_peak_a + L, sigma_a)      (per s)
+  (b = background rate of detections not caused by a tracked aircraft: untracked
+  aircraft, vehicles, wind; default 4 / h). The evidence of one peak is the
+  *conditional* density of its time given one detection in the window
+  W = [t_obs - 180 s, t_obs + 180 s], scaled so that "no information" = 1:
+      r(x, L) = 2|W| lambda(t_obs | x, L) / integral_W lambda(t | x, L) dt
+      P(peak | x) = sum_L w(L) r(x, L)
+  The normalisation is essential: an unnormalised "some aircraft explains the
+  peak" score (1 - prod_a (1 - p_a)) saturates wherever audible traffic is dense
+  (airport approaches, airway crossings), so every peak would favour busy
+  airspace over the quiet forest the box stands in. Under r(x, L) a place where
+  aircraft pass all the time is uninformative (r ~ 1), a place where one aircraft
+  passes exactly at the right time scores high, and a place where aircraft pass
+  at the wrong times scores < 1. Missed detections are not modelled (the
+  analyzer's detection efficiency is unknown), so no expected-count penalty.
 
 Latency calibration
 -------------------
 Given >= 3 non-looped audio peaks, candidate box locations x_k with weights w_k
 from the current posterior (output/posterior.npz pooled to ~5 km blocks), and the
 tracks around each peak:
-      J(L) = sum_k w_k prod_e P(peak_e | x_k, L)
+      J(L) = sum_k w_k prod_e r_e(x_k, L)
 The posterior over L (flat prior on 0-120 s) is well determined when at least
-3 peaks are explained by aircraft (not by the floor), the MAP is sharply peaked
-(posterior sd <= 8 s, >= 70 % mass within +-10 s) and log J(MAP) exceeds the
-median by >= 3. Only then are ``latency_s`` / ``latency_sigma_s`` written to the
-calibration table (the runner reads ``latency_s`` as a float at start-up) and
+3 peaks are explained by aircraft (r >= 3 at the MAP and best candidate), the MAP
+is sharply peaked (posterior sd <= 8 s, >= 70 % mass within +-10 s) and log J(MAP)
+exceeds the median by >= 3. Only then are ``latency_s`` / ``latency_sigma_s`` written
+to the calibration table (the runner reads ``latency_s`` as a float at start-up) and
 the live StreamClock updated. A systematic floor of 3 s (wind, directivity) is
 added in quadrature to the statistical sd. One peak alone cannot calibrate:
-latency trades off against position along the track.
+latency trades off against position along the track. Candidate positions are
+~5 km block centroids, so a few km of along-track position error (~10 s at
+airliner speed) enters the fit; it averages out over peaks from aircraft on
+different headings but is one reason for the systematic floor.
+
+Reliability and independence groups
+-----------------------------------
+Per event r = r_kind x f(detection confidence), clipped to 0.5-0.75 for confident
+detections (and x 0.8 before clipping when the ADS-B coverage may be incomplete).
+Gesture-only events whose detections are all below ``gesture_strong_conf`` (0.5;
+e.g. the arm-only fallback detector) get r 0.2-0.5 and share one daily group
+hw_aircraft_lowconf_<YYYYMMDD>: fusion averages them instead of multiplying, so a
+noisy detector that fires on stretching or hair-fixing cannot compound many
+"some aircraft was overhead then" layers (which favour busy airspace).
 
 Daily audio layers: many per-event audio layers (a live microphone hears dozens of
 overflights a day) would each carry their own reliability and compound if the
@@ -89,7 +127,11 @@ ADS-B sources (``providers`` config, tried in order until one covers the window)
 * ``adsblol_history`` globe.adsb.lol globe_history trace_full per hex (hexes from recorded
                   snapshots or ``hexes`` config). Incomplete by construction.
 * ``opensky``     OpenSky /api/states/all?time= (OAuth2 client credentials or legacy basic
-                  auth; anonymous access only serves the present). Step 15 s, bbox-limited.
+                  auth). Step 15 s, bbox-limited. The REST API serves state vectors at most
+                  1 h back even to registered users (older ``time`` -> HTTP 400) and ignores
+                  ``time`` for anonymous users, so this is a near-real-time fallback for
+                  events processed within the hour, never a history source; older or
+                  anonymous windows are refused without a request.
 * ``adsblol_release`` daily globe_history tarballs on GitHub (adsblol/globe_history_YYYY,
                   multi-GB; streamed and filtered to the bbox). Off by default; asset naming
                   not verified from this container.
@@ -119,6 +161,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+from scipy.special import ndtr
 
 from hordejakt import DEFAULTNO, MAGNUS, RAW
 from hordejakt.geo import FT, R_EARTH, bearing, elevation_angle, haversine
@@ -127,9 +170,9 @@ from hordejakt.layers.aircraft import BOX, COARSE_DLAT, COARSE_DLON, OBSERVER_M,
 
 from ..analyzers.base import Analyzer
 from ..types import UTC, Observation, parse_iso
-from .common import (RateLimitedLog, cache_dir, capture_time, coarse_axes, dumps, from_unix, layers_dir,
-                     load_state, local_date, posterior_candidates, save_state, setting, stamp, to_unix,
-                     upsample, write_layer)
+from .common import (RateLimitedLog, cache_dir, coarse_axes, dumps, from_unix, layers_dir, load_state, local_date,
+                     observation_latencies, posterior_candidates, save_state, setting, stamp, to_unix, upsample,
+                     write_layer)
 
 log = logging.getLogger("hordewatch.bridges.adsb")
 warn_once = RateLimitedLog(600)
@@ -158,15 +201,18 @@ FLYHENDELSER_STREAM = {"21.09 21:29": "2026-09-21T21:29:38+02:00",
 DEFAULTS = {
     "providers": ["live_record", "trace_cache", "adsblol_history", "opensky"],
     "latency_range_s": [15.0, 60.0], "latency_margin_s": 10.0, "latency_step_s": 2.5,
-    "reaction_s": 8.0,
+    "reaction_s": 8.0, "max_dwell_s": 60.0,
     "q": 0.85, "floor": 0.05, "vis_mid": 25.0, "vis_scale": 3.0, "min_alt_ft": 3000.0,
     "tilt_sigma_deg": 12.0, "tilt_weight": 0.6,
     "light_sigma_deg": 3.0, "light_floor": 0.1,
-    "audible_s50_km": 16.0, "audible_width_km": 2.5, "audio_floor": 0.1, "sound_speed": "isa",
+    "audible_s50_km": 16.0, "audible_width_km": 2.5, "sound_speed": "isa",
+    "audio_bg_rate_per_h": 4.0, "audio_window_s": 180.0, "audio_cpa_dt_s": 4.0,
     "audio_sigma_det_s": 4.0, "audio_width_frac": 0.3,
-    "cluster_s": 60.0, "settle_s": 180.0, "retry_s": 300.0, "max_tries": 12, "lookback_h": 24 * 14,
+    "cluster_s": 60.0, "max_cluster_s": 300.0, "settle_s": 180.0, "retry_s": 300.0, "max_tries": 12,
+    "lookback_h": 24 * 14,
     "loop_margin_s": 30.0, "calibrate": True, "calib_min_events": 3, "calib_every_s": 900.0,
     "reliability": {"gesture_point_up": 0.65, "aircraft_light": 0.7, "audio_aircraft": 0.55},
+    "gesture_strong_conf": 0.5,
     "camera_heading_deg": 219.6, "camera_pitch_deg": 0.0, "camera_roll_deg": 0.0,
     "camera_focal_px_1280": 1068.0, "image_w": 1280, "image_h": 720,
     "async": True, "live_record": None, "poll_s": 10.0,
@@ -790,10 +836,14 @@ class OpenSkyProvider(AdsbProvider):
             return {"auth": (self.user, self.pw)}
         return {}
 
+    MAX_AGE_S = 3600.0 - 120.0     # REST state vectors: registered users <= 1 h back (older -> HTTP 400)
+    TIME_TOL_S = 20.0              # a response whose "time" differs more was not served for the asked time
+
     def tracks(self, t0, t1, bbox=FETCH_BBOX):
-        self._s = self._s or _session()
         la0, la1, lo0, lo1 = bbox
-        times = np.arange(np.floor(t0), t1 + 1, self.step_s)[: self.max_calls]
+        times = np.arange(np.floor(t0), t1 + 1, self.step_s)
+        covered = len(times) <= self.max_calls
+        times = times[: self.max_calls]
         pts, ok_calls = [], 0
         for t in times:
             dest = self.cache_root / from_unix(t).strftime("%Y%m%d") / f"states_{int(t)}_{la0:.1f}_{lo0:.1f}.json"
@@ -801,12 +851,19 @@ class OpenSkyProvider(AdsbProvider):
                 if dest.exists():
                     obj = json.loads(dest.read_text())
                 else:
+                    if not ((self.cid and self.csecret) or (self.user and self.pw)):
+                        raise ProviderError("anonymous OpenSky access only serves the present state (time is ignored); "
+                                            "set opensky client_id/client_secret")
+                    if time.time() - t > self.MAX_AGE_S:
+                        raise ProviderError("OpenSky /states/all serves at most 1 h of history; window is older "
+                                            "(use the live recorder or adsb.lol history)")
+                    self._s = self._s or _session()
                     auth = self._auth()
-                    if not auth and time.time() - t > 3600:
-                        raise ProviderError("anonymous OpenSky access cannot query the past; set client_id/client_secret")
                     r = _http_get(self._s, self.API, timeout=self.timeout,
                                   params={"time": int(t), "lamin": la0, "lamax": la1, "lomin": lo0, "lomax": lo1}, **auth)
                     obj = r.json()
+                    if abs(float(obj.get("time") or 0.0) - t) > self.TIME_TOL_S:
+                        raise ProviderError(f"OpenSky answered for time {obj.get('time')} instead of {int(t)}")
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     dest.write_text(json.dumps(obj))
                 pts += parse_opensky_states(obj)
@@ -814,7 +871,8 @@ class OpenSkyProvider(AdsbProvider):
             except Exception as e:
                 warn_once("opensky", "OpenSky unavailable (%s); continuing without it", e)
                 break
-        complete = ok_calls == len(times) and ok_calls > 0
+        # complete only when every requested time was served and the requests covered the whole window
+        complete = covered and ok_calls == len(times) and ok_calls > 0
         return TrackSet(points_to_tracks(pts, "opensky", max_gap_s=3 * self.step_s), complete,
                         ["opensky"] if pts else [])
 
@@ -872,7 +930,11 @@ class AdsbLolReleaseProvider(AdsbProvider):
         for page in range(1, 6):
             r = _http_get(s, self.API.format(Y=day.year), params={"per_page": 100, "page": page}, timeout=self.timeout)
             rels = r.json()
-            rel = next((x for x in rels if tag in x.get("tag_name", "")), None)
+            hits = [x for x in rels if tag in x.get("tag_name", "")]
+            # several releases per day are possible (prod / staging, re-uploads): prefer prod, then the newest
+            hits.sort(key=lambda x: x.get("published_at") or "", reverse=True)
+            hits.sort(key=lambda x: "prod" not in x.get("tag_name", ""))          # stable: prod first, newest first
+            rel = hits[0] if hits else None
             if rel or not rels:
                 break
         if not rel:
@@ -972,8 +1034,8 @@ class LiveRecorder(threading.Thread):
                                              None if p["alt_m"] is None else round(p["alt_m"]), p["gs"], p["track"]]
                 used = src
                 break
-            except ProviderError as e:
-                warn_once(f"live:{src}", "live ADS-B source %s unreachable (%s); trying next", src, e)
+            except (ProviderError, ValueError, KeyError, TypeError) as e:   # unreachable, or not readsb JSON
+                warn_once(f"live:{src}", "live ADS-B source %s unusable (%s); trying next", src, e)
                 acs = {}
         if used is None:
             return False
@@ -1106,13 +1168,14 @@ def positions_at(tracks, t, min_alt_m):
 
 
 def sighting_prob(CL, CO, tracks, t_capture, delays, dweights, q=0.85, floor=0.05, mid=25.0, scale=3.0,
-                  min_alt_m=900.0, tilt_obs=None, tilt_sigma=12.0, tilt_weight=0.6, heading=219.6):
+                  min_alt_m=900.0, tilt_obs=None, tilt_sigma=12.0, tilt_weight=0.6, heading=219.6, tilt_sign_p=1.0):
     """P(she points up at t_capture | box at (CL, CO)) marginalised over delay D.
 
     Identical geometry to hordejakt.layers.aircraft.event_prob (4/3-earth
     elevation angle, observer at OBSERVER_M, logistic canopy visibility), but
     evaluated only where vis() is non-negligible and with an optional arm-tilt
-    factor (see module docstring)."""
+    factor (see module docstring); ``tilt_sign_p`` is the probability that the
+    sign of ``tilt_obs`` is right (1 = signed tilt known exactly)."""
     clats, clons = CL[:, 0], CO[0, :]
     emin = max(mid - 7 * scale, 2.0)
     P = np.zeros(CL.shape)
@@ -1129,9 +1192,11 @@ def sighting_prob(CL, CO, tracks, t_capture, delays, dweights, q=0.85, floor=0.0
             el = elevation_angle(g, h)
             p = q * vis(el, mid, scale)
             if tilt_obs is not None:
-                az = bearing(cl, co, la, lo)
-                d = image_tilt(az, el, heading) - tilt_obs
-                p = p * ((1 - tilt_weight) + tilt_weight * np.exp(-0.5 * (d / tilt_sigma) ** 2))
+                tau = image_tilt(bearing(cl, co, la, lo), el, heading)
+                g = tilt_sign_p * np.exp(-0.5 * ((tau - tilt_obs) / tilt_sigma) ** 2)
+                if tilt_sign_p < 1.0:
+                    g = g + (1.0 - tilt_sign_p) * np.exp(-0.5 * ((tau + tilt_obs) / tilt_sigma) ** 2)
+                p = p * ((1 - tilt_weight) + tilt_weight * g)
             miss[si, sj] *= 1.0 - p
         P += w * (floor + (1.0 - floor) * (1.0 - miss))
     return P / np.sum(dweights)
@@ -1201,7 +1266,10 @@ def audio_cpa(track, lats, lons, t0, t1, dt=2.0, max_km=40.0, sound_speed="isa",
             r = np.arange(len(ii))
             y0, y1, y2 = s2[r, kk - 1], s2[r, kk], s2[r, kk + 1]
             den = y0 - 2 * y1 + y2
-            off = np.where(den > 0, 0.5 * (y0 - y2) / np.where(den > 0, den, 1), 0.0)
+            # parabolic refinement (exact for straight flight: s^2 is quadratic in t) -- only
+            # across evenly spaced neighbours (samples dropped below min_alt / in gaps break that)
+            even = np.isclose(ts[kk + 1] - ts[kk], dt) & np.isclose(ts[kk] - ts[kk - 1], dt)
+            off = np.where((den > 0) & even, 0.5 * (y0 - y2) / np.where(den > 0, den, 1), 0.0)
             off = np.clip(off, -1, 1)
             tc = ts[kk] + off * dt
             smin = np.sqrt(np.maximum(y1 - 0.25 * (y0 - y2) * off, 0.0))
@@ -1213,29 +1281,60 @@ def audio_cpa(track, lats, lons, t0, t1, dt=2.0, max_km=40.0, sound_speed="isa",
     return CPA(s_out.reshape(shape), t_out.reshape(shape), sd_out.reshape(shape))
 
 
-def audio_prob_per_latency(cpas, t_obs, lat_vals, floor=0.1, s50=16.0, width=2.5):
-    """P(peak at stream time t_obs | x, L) for every audio latency L -> array (len(L), *shape):
-    floor + (1-floor) [1 - prod_a (1 - P_aud(s_a) exp(-(t_obs - L - t_peak_a)^2 / 2 sigma_a^2))]."""
+SQRT2PI = np.sqrt(2.0 * np.pi)
+
+
+def audio_prob_per_latency(cpas, t_obs, lat_vals, bg_rate=4.0 / 3600.0, window_s=180.0, s50=16.0, width=2.5):
+    """Timing likelihood ratio r(x, L) of one audio peak at stream time ``t_obs`` for every
+    audio latency L -> array (len(L), *shape); 1 = uninformative (see module docstring):
+
+        lambda(t | x, L) = b + sum_a P_aud(s_a) N(t; t_peak_a + L, sigma_a)
+        r(x, L) = 2 W lambda(t_obs | x, L) / integral_{t_obs-W}^{t_obs+W} lambda(t | x, L) dt
+
+    ``bg_rate`` b is per second. CPAs outside their computation window are NaN and
+    contribute to neither term, so the CPA window must cover t_obs - L -+ W for all L."""
     shape = cpas[0].slant_km.shape
-    out = np.empty((len(lat_vals),) + shape)
-    aud = [np.nan_to_num(audible_prob(c.slant_km, s50, width)) for c in cpas]
-    for k, L in enumerate(lat_vals):
-        miss = np.ones(shape)
-        for c, pa in zip(cpas, aud):
-            d = np.nan_to_num(t_obs - L - c.t_peak, nan=1e6)
-            miss *= 1.0 - pa * np.exp(-0.5 * (d / np.nan_to_num(c.sigma_t, nan=1.0)) ** 2)
-        out[k] = floor + (1.0 - floor) * (1.0 - miss)
-    return out
+    W = float(window_s)
+    b = max(float(bg_rate), 1e-9)
+    out = np.full((len(lat_vals),) + shape, 2.0 * W * b)       # numerator 2W lambda, background part
+    den = np.full((len(lat_vals),) + shape, 2.0 * W * b)       # expected detections in the window
+    flat_out = out.reshape(len(lat_vals), -1)
+    flat_den = den.reshape(len(lat_vals), -1)
+    L = np.asarray(lat_vals, float)[:, None]
+    for c in cpas:
+        s = c.slant_km.ravel()
+        idx = np.nonzero(np.isfinite(s) & np.isfinite(c.t_peak.ravel()))[0]
+        if not len(idx):
+            continue
+        pa = audible_prob(s[idx], s50, width)
+        keep = pa > 1e-4
+        idx, pa = idx[keep], pa[keep]
+        if not len(idx):
+            continue
+        mu = c.t_peak.ravel()[idx][None, :] + L            # stream time of this aircraft's peak at x
+        sd = np.maximum(c.sigma_t.ravel()[idx], 0.5)[None, :]
+        z = (t_obs - mu) / sd
+        flat_out[:, idx] += 2.0 * W * pa * np.exp(-0.5 * z * z) / (sd * SQRT2PI)
+        flat_den[:, idx] += pa * (ndtr((t_obs + W - mu) / sd) - ndtr((t_obs - W - mu) / sd))
+    return out / den
 
 
-def audio_prob_from_cpas(cpas, t_obs, lat_vals, lat_w, floor=0.1, s50=16.0, width=2.5):
-    """P(peak at stream time t_obs | x) = sum_L w(L) P(peak | x, L) for a list of CPA
-    arrays (same shape). ``lat_vals`` are *audio* latencies."""
+def audio_prob_from_cpas(cpas, t_obs, lat_vals, lat_w, bg_rate=4.0 / 3600.0, window_s=180.0, s50=16.0, width=2.5):
+    """Evidence of one peak marginalised over the audio latency: sum_L w(L) r(x, L)
+    (1 = uninformative) for a list of CPA arrays (same shape). ``lat_vals`` are *audio* latencies."""
     if not cpas:
         return None
-    PL = audio_prob_per_latency(cpas, t_obs, lat_vals, floor, s50, width)
+    PL = audio_prob_per_latency(cpas, t_obs, lat_vals, bg_rate, window_s, s50, width)
     w = np.asarray(lat_w, float)
     return np.tensordot(w / w.sum(), PL, axes=1)
+
+
+def audio_track_window(t_obs, lat_vals, window_s=180.0):
+    """Track time span [t0, t1] (unix) that audio_cpa needs so that every aircraft whose
+    peak can fall inside t_obs - L -+ W (any L in ``lat_vals``) has an interior CPA:
+    the CPA precedes the peak by s/c <= ~110 s at audible ranges."""
+    lv = np.asarray(lat_vals, float)
+    return t_obs - float(lv.max()) - window_s - 140.0, t_obs - float(lv.min()) + window_s + 30.0
 
 
 def prior_on(grid_vals, Lv, Lw):
@@ -1247,34 +1346,34 @@ def prior_on(grid_vals, Lv, Lw):
 
 
 # =========================================================================== latency calibration
-def calibrate_latency(events, cand_lats, cand_lons, cand_w, tracks_for, grid=None, floor=0.1, s50=16.0, width=2.5,
-                      sound_speed="isa", sys_floor_s=3.0, min_events=3):
+def calibrate_latency(events, cand_lats, cand_lons, cand_w, tracks_for, grid=None, bg_rate=4.0 / 3600.0,
+                      window_s=180.0, s50=16.0, width=2.5, sound_speed="isa", sys_floor_s=3.0, min_events=3,
+                      match_ratio=3.0, sigma_det=4.0, width_frac=0.3, dt=4.0):
     """Joint stream-latency estimate from audio peaks (see module docstring).
 
     events: [{"id", "t_obs" (unix capture time of the peak)}]; tracks_for(event)
-    -> list[Track] covering [t_obs - 200 s, t_obs + 30 s]. Returns a dict with
-    latency_s, latency_sigma_s, posterior grid, n_matched and well_determined.
+    -> list[Track] covering audio_track_window(t_obs, grid, window_s). Returns a dict
+    with latency_s, latency_sigma_s, posterior grid, n_matched and well_determined.
     """
     grid = np.arange(0.0, 120.0 + 1e-9, 0.5) if grid is None else np.asarray(grid)
     cand_lats, cand_lons = np.asarray(cand_lats, float), np.asarray(cand_lons, float)
     cand_w = np.asarray(cand_w, float) / np.sum(cand_w)
     K = len(cand_lats)
-    loglik = np.zeros((K, len(grid)))  # sum_e log P(e | x_k, L)
+    loglik = np.zeros((K, len(grid)))  # sum_e log r_e(x_k, L)
     per_event = []
     for ev in events:
         t_obs = ev["t_obs"]
+        w0, w1 = audio_track_window(t_obs, grid, window_s)
         cpas = []
         for tr in tracks_for(ev):
-            c = audio_cpa(tr, cand_lats, cand_lons, t_obs - grid[-1] - 200.0, t_obs - grid[0] + 30.0,
-                          sound_speed=sound_speed)
+            c = audio_cpa(tr, cand_lats, cand_lons, w0, w1, dt=dt, sound_speed=sound_speed, sigma_det=sigma_det,
+                          width_frac=width_frac)
             if c is not None and np.isfinite(c.slant_km).any():
-                cpas.append((tr, c))
-        miss = np.ones((K, len(grid)))
-        for tr, c in cpas:
-            pa = np.nan_to_num(audible_prob(c.slant_km, s50, width))[:, None]
-            d = np.nan_to_num(t_obs - grid[None, :] - c.t_peak[:, None], nan=1e6)
-            miss *= 1.0 - pa * np.exp(-0.5 * (d / np.nan_to_num(c.sigma_t, nan=1.0)[:, None]) ** 2)
-        p_ev = floor + (1.0 - floor) * (1.0 - miss)
+                cpas.append(c)
+        if cpas:
+            p_ev = audio_prob_per_latency(cpas, t_obs, grid, bg_rate, window_s, s50, width).T   # (K, len(grid))
+        else:
+            p_ev = np.ones((K, len(grid)))
         loglik += np.log(p_ev)
         per_event.append((ev, p_ev))
     # J(L) = sum_k w_k exp(loglik_k(L))
@@ -1289,8 +1388,9 @@ def calibrate_latency(events, cand_lats, cand_lons, cand_w, tracks_for, grid=Non
     sd_stat = float(np.sqrt(np.sum(pn * (grid[near] - L_map) ** 2)))
     mass10 = float(post[np.abs(grid - L_map) <= 10.0].sum())
     # which events are explained by an aircraft (not the floor) at the MAP latency and best candidate
-    k_best = int(np.argmax(loglik[:, i] + np.log(cand_w)))
-    matched = [ev["id"] for ev, p in per_event if p[k_best, i] > floor + (1 - floor) * 0.5]
+    with np.errstate(divide="ignore"):
+        k_best = int(np.argmax(loglik[:, i] + np.log(cand_w)))
+    matched = [ev["id"] for ev, p in per_event if p[k_best, i] >= match_ratio]
     contrast = float(J[i] - np.median(J))
     sd = float(np.hypot(max(sd_stat, 0.5), sys_floor_s))
     well = (len(events) >= min_events and len(matched) >= min_events and sd_stat <= 8.0 and mass10 >= 0.7
@@ -1376,26 +1476,62 @@ class AircraftBridge(Analyzer):
     def _loops(self, db, t0, t1):
         return [r for r in db.observations(kind="audio_loop", since=from_unix(t0 - 3600), until=from_unix(t1 + 3600))]
 
+    @staticmethod
+    def _loop_intervals(rows):
+        """audio_loop rows -> [(t_start, t_end)] real times of the repeated segments. The
+        contract only guarantees ts (start); a duration_s / len_s / end field widens it."""
+        out = []
+        for r in rows:
+            t0 = to_unix(r["ts"])
+            v = r.get("value") or {}
+            dur = _num(v.get("duration_s"), None) or _num(v.get("len_s"), None) or 0.0
+            t1 = t0 + max(dur, 0.0)
+            if isinstance(v.get("end"), str):
+                try:
+                    t1 = max(t1, to_unix(parse_iso(v["end"])))
+                except ValueError:
+                    pass
+            out.append((t0, t1))
+        return out
+
+    def _is_looped(self, t_real, intervals):
+        m = float(self.get("loop_margin_s"))
+        return any(a - m <= t_real <= b + m for a, b in intervals)
+
     def collect_events(self, db, clock, now=None):
-        """Cluster trigger observations into events (list of dicts, oldest first)."""
+        """Cluster trigger observations into events (list of dicts, oldest first).
+
+        Each row's phenomenon capture time is ts + the latency its analyzer used
+        (see common.observation_latencies): ts_capture is the capture of the frame the
+        row was *emitted* on, which for gesture 'summary' rows is the end of the
+        pointing episode and for aircraft_light the frame that closed the track. The
+        latency is kept in row['_lat'] to convert other real times in the value
+        (track points, peak_ts). A cluster ends after a gap > cluster_s or when it
+        spans max_cluster_s (a detector firing continuously must not hold one event
+        open forever)."""
         now = time.time() if now is None else now
         since = from_unix(now - float(self.get("lookback_h")) * 3600)
         rows = db.observations(kind=list(TRIGGERS), since=since)
+        lats = observation_latencies(db, rows, clock)
         items = []
-        for r in rows:
-            tc = capture_time(r, clock)
+        for r, lat in zip(rows, lats):
+            r = dict(r, _lat=float(lat))
+            tc = to_unix(r["ts"]) + lat
             if r["kind"] == "audio_aircraft":
                 pk = r["value"].get("peak_ts")
-                off = tc - to_unix(r["ts"])
                 if isinstance(pk, str):
-                    tc = to_unix(parse_iso(pk)) + off
+                    try:
+                        tc = to_unix(parse_iso(pk)) + lat
+                    except ValueError:
+                        pass
                 elif isinstance(pk, (int, float)):
-                    tc = (float(pk) + off) if pk > 1e9 else (to_unix(r["ts"]) + float(pk) + off)
+                    tc = (float(pk) + lat) if pk > 1e9 else (to_unix(r["ts"]) + float(pk) + lat)
             items.append((tc, r))
         items.sort(key=lambda x: x[0])
         events, cur = [], None
+        gap, span = float(self.get("cluster_s")), float(self.get("max_cluster_s"))
         for tc, r in items:
-            if cur is None or tc - cur["t_last"] > float(self.get("cluster_s")):
+            if cur is None or tc - cur["t_last"] > gap or tc - cur["t_first"] > span:
                 cur = {"t_first": tc, "t_last": tc, "obs": []}
                 events.append(cur)
             cur["obs"].append((tc, r))
@@ -1405,10 +1541,19 @@ class AircraftBridge(Analyzer):
             ev["kinds"] = sorted({r["kind"] for _, r in ev["obs"]})
         return events
 
+    def is_weak(self, ev):
+        """Gesture-only event whose detections are all low-confidence (see module docstring)."""
+        kinds = {r["kind"] for _, r in ev["obs"]}
+        if kinds != {"gesture_point_up"}:
+            return False
+        return max(float(r.get("confidence") or 0.0) for _, r in ev["obs"]) < float(self.get("gesture_strong_conf"))
+
     def event_group(self, ev):
         for g, ts in BUILTIN_EVENTS.items():
             if abs(ev["t_first"] - to_unix(ts)) <= DEDUP_S:
                 return g
+        if self.is_weak(ev):
+            return f"hw_aircraft_lowconf_{local_date(ev['t_first'])}"
         return f"hw_aircraft_{ev['id']}"
 
     def _latency(self, ctx):
@@ -1431,17 +1576,23 @@ class AircraftBridge(Analyzer):
         return w, h, f, heading, float(self.get("camera_pitch_deg")), float(self.get("camera_roll_deg"))
 
     def _tilt(self, value):
+        """(signed image tilt of the arm in deg, P(sign right)) or (None, 0).
+        The gesture analyzer's angle is unsigned; its 'side' is the tilt direction only
+        for the arm-only path (tip vs. base), otherwise the side of the body the raised
+        arm is on (MediaPipe wrist vs. shoulder midpoint, limb tip vs. core centre)."""
         if value.get("tilt_deg_image") is not None:
-            return _num(value["tilt_deg_image"])
+            t = _num(value["tilt_deg_image"])
+            return (t, 0.95) if t is not None else (None, 0.0)
         a = _num(value.get("arm_angle_deg_from_vertical"))
         if a is None:
-            return None
+            return None, 0.0
         side = str(value.get("side", "")).lower()
+        p = 0.9 if value.get("arm_only") else 0.75
         if "left" in side:
-            return -abs(a)
+            return -abs(a), p
         if "right" in side:
-            return abs(a)
-        return None
+            return abs(a), p
+        return None, 0.0
 
     def process_event(self, ev, lat_prior, loops=(), audio_offset=0.0, write=True):
         """Compute the event layer. Returns {status, loglik, meta, path, matches}.
@@ -1449,34 +1600,42 @@ class AircraftBridge(Analyzer):
         clats, clons = coarse_axes(BOX, COARSE_DLAT, COARSE_DLON)
         CL, CO = np.meshgrid(clats, clons, indexing="ij")
         Lv, Lw = lat_prior
-        rel_cfg = self.get("reliability")
+        rel_cfg = {**DEFAULTS["reliability"], **(self.get("reliability") or {})}   # partial overrides allowed
         by_kind = {}
         for tc, r in ev["obs"]:
             by_kind.setdefault(r["kind"], []).append((tc, r))
         # audio: drop looped segments
-        loop_ts = [to_unix(r["ts"]) for r in loops]
+        loop_iv = self._loop_intervals(loops)
         if "audio_aircraft" in by_kind:
-            keep = []
-            for tc, r in by_kind["audio_aircraft"]:
-                t_real = to_unix(r["ts"])
-                if any(abs(t_real - lt) <= float(self.get("loop_margin_s")) for lt in loop_ts):
-                    continue
-                keep.append((tc, r))
+            keep = [(tc, r) for tc, r in by_kind["audio_aircraft"] if not self._is_looped(to_unix(r["ts"]), loop_iv)]
             if keep:
                 by_kind["audio_aircraft"] = keep
             else:
                 by_kind.pop("audio_aircraft")
         if not by_kind:
             return {"status": "skipped", "reason": "looped audio only"}
-        # ADS-B window: sightings need t_capture - D for D in the delay prior; audio also
-        # needs the minutes before the peak (CPA precedes reception by s/c <~ 80 s)
+        # gesture timing: positions at t_c - D, D = L + u, u in [-dwell, reaction + sampling gap]
+        # (she saw it just before the onset frame and follows it while pointing)
+        if "gesture_point_up" in by_kind:
+            gobs = by_kind["gesture_point_up"]
+            g_tc = gobs[0][0]
+            durs = [_num(r["value"].get("duration_s"), 0.0) or 0.0 for _, r in gobs]
+            dwell = float(np.clip(max(durs + [gobs[-1][0] - g_tc]), 0.0, float(self.get("max_dwell_s"))))
+            gaps = [_num(r["value"].get("sampling_gap_s"), 0.0) or 0.0 for _, r in gobs
+                    if r["value"].get("phase", "onset") == "onset"]
+            gap = float(np.clip(max(gaps) if gaps else 0.0, 0.0, 30.0))
+            gD, gW = with_reaction(Lv - dwell, Lw, float(self.get("reaction_s")) + gap + dwell)
+        # ADS-B window: sightings need t_capture - D for every D; audio needs every aircraft
+        # whose peak can fall into the conditional window (see audio_track_window)
         wins = []
-        if "gesture_point_up" in by_kind or "aircraft_light" in by_kind:
-            wins.append((ev["t_first"] - float(Lv.max()) - float(self.get("reaction_s")) - 30.0,
-                         ev["t_last"] - float(Lv.min()) + 10.0))
+        if "gesture_point_up" in by_kind:
+            wins.append((g_tc - float(gD.max()) - 30.0, g_tc - float(gD.min()) + 30.0))
+        if "aircraft_light" in by_kind:
+            wins.append((ev["t_first"] - float(Lv.max()) - 30.0, ev["t_last"] - float(Lv.min()) + 120.0))
+        W_a = float(self.get("audio_window_s"))
         if "audio_aircraft" in by_kind:
-            La_ = np.maximum(Lv - audio_offset, 0.0)
-            wins.append((ev["t_first"] - float(La_.max()) - 200.0, ev["t_last"] - float(La_.min()) + 30.0))
+            a0, a1 = audio_track_window(0.0, AUDIO_L_GRID, W_a)
+            wins.append((ev["t_first"] + a0, ev["t_last"] + a1))
         t0, t1 = min(w[0] for w in wins), max(w[1] for w in wins)
         ts = resolve_tracks(self.build_providers(), t0, t1)
         if not ts.tracks and not ts.complete:
@@ -1488,31 +1647,35 @@ class AircraftBridge(Analyzer):
         q, floor = float(self.get("q")), float(self.get("floor"))
         mid, scale = float(self.get("vis_mid")), float(self.get("vis_scale"))
         if "gesture_point_up" in by_kind:
-            obs = by_kind["gesture_point_up"]
-            tc = obs[0][0]
-            dwell = min(obs[-1][0] - tc, 20.0)
-            D, W = with_reaction(Lv, Lw, float(self.get("reaction_s")) + dwell)
-            tilt = next((self._tilt(r["value"]) for _, r in obs if self._tilt(r["value"]) is not None), None)
+            tilt, sign_p = None, 0.0
+            for _, r in sorted(gobs, key=lambda x: x[1]["value"].get("phase") == "summary"):   # onset rows first
+                tilt, sign_p = self._tilt(r["value"])
+                if tilt is not None:
+                    break
             heading = self._camera({})[3]
-            P = sighting_prob(CL, CO, ts.tracks, tc, D, W, q=q, floor=floor, mid=mid, scale=scale, min_alt_m=min_alt,
-                              tilt_obs=tilt, tilt_sigma=float(self.get("tilt_sigma_deg")),
-                              tilt_weight=float(self.get("tilt_weight")), heading=heading)
+            P = sighting_prob(CL, CO, ts.tracks, g_tc, gD, gW, q=q, floor=floor, mid=mid, scale=scale,
+                              min_alt_m=min_alt, tilt_obs=tilt, tilt_sigma=float(self.get("tilt_sigma_deg")),
+                              tilt_weight=float(self.get("tilt_weight")), heading=heading, tilt_sign_p=sign_p)
             logP += np.log(P)
-            conf = max(r["confidence"] or 0.5 for _, r in obs)
-            rels.append(rel_cfg["gesture_point_up"] * (0.8 + 0.4 * conf))
-            descs.append(f"points up at {from_unix(tc):%Y-%m-%d %H:%M:%S}Z stream" + (f", arm tilt {tilt:+.0f} deg" if tilt is not None else ""))
+            conf = max(float(r["confidence"] if r.get("confidence") is not None else 0.5) for _, r in gobs)
+            # detection confidence scales the reliability: 0.6 -> r_kind, 0.25 (arm-only fallback) -> 0.42 r_kind
+            rels.append(rel_cfg["gesture_point_up"] * float(np.clip(conf / 0.6, 0.3, 1.15)))
+            descs.append(f"points up at {from_unix(g_tc):%Y-%m-%d %H:%M:%S}Z stream (conf {conf:.2f}"
+                         + (f", {dwell:.0f} s" if dwell > 0 else "")
+                         + (f", arm tilt {tilt:+.0f} deg p_sign {sign_p:.2f})" if tilt is not None else ")"))
         if "aircraft_light" in by_kind:
             pts = []
             for tc, r in by_kind["aircraft_light"]:
                 w, h, f, heading, pitch, roll = self._camera(r["value"])
+                lat_used = float(r.get("_lat", tc - to_unix(r["ts"])))   # real -> capture for track times
                 trk = r["value"].get("track") or []
                 sel = trk if len(trk) <= 3 else [trk[0], trk[len(trk) // 2], trk[-1]]
                 for p in sel:
                     tt, x, y = p[0], float(p[1]), float(p[2])
                     if isinstance(tt, str):
-                        tcp = to_unix(parse_iso(tt)) + (tc - to_unix(r["ts"]))
+                        tcp = to_unix(parse_iso(tt)) + lat_used
                     elif tt is not None and float(tt) > 1e9:
-                        tcp = float(tt) + (tc - to_unix(r["ts"]))
+                        tcp = float(tt) + lat_used
                     else:
                         tcp = tc + float(tt or 0.0)
                     az, el = pixel_to_azel(x, y, w, h, f, heading, pitch, roll)
@@ -1527,32 +1690,34 @@ class AircraftBridge(Analyzer):
         if "audio_aircraft" in by_kind:
             best = max(by_kind["audio_aircraft"], key=lambda x: _num(x[1]["value"].get("snr_db"), 0.0))
             t_obs = best[0]
-            La = np.maximum(Lv - audio_offset, 0.0)
+            w0, w1 = audio_track_window(t_obs, AUDIO_L_GRID, W_a)
             cpas = []
             for tr in ts.tracks:
-                c = audio_cpa(tr, CL, CO, t_obs - La.max() - 200.0, t_obs - La.min() + 30.0,
+                c = audio_cpa(tr, CL, CO, w0, w1, dt=float(self.get("audio_cpa_dt_s")),
                               sound_speed=self.get("sound_speed"), sigma_det=float(self.get("audio_sigma_det_s")),
                               width_frac=float(self.get("audio_width_frac")))
                 if c is not None and np.isfinite(c.slant_km).any():
                     cpas.append(c)
-            afloor = float(self.get("audio_floor"))
             if cpas:
-                PL = audio_prob_per_latency(cpas, t_obs, AUDIO_L_GRID, floor=afloor, s50=float(self.get("audible_s50_km")),
+                PL = audio_prob_per_latency(cpas, t_obs, AUDIO_L_GRID, bg_rate=float(self.get("audio_bg_rate_per_h")) / 3600.0,
+                                            window_s=W_a, s50=float(self.get("audible_s50_km")),
                                             width=float(self.get("audible_width_km")))
             else:
-                PL = np.full((len(AUDIO_L_GRID),) + CL.shape, afloor)
+                PL = np.ones((len(AUDIO_L_GRID),) + CL.shape)    # no audible aircraft anywhere: no information
             P = np.tensordot(prior_on(AUDIO_L_GRID + audio_offset, Lv, Lw), PL, axes=1)
             logP += np.log(P)
             if set(by_kind) == {"audio_aircraft"}:
                 audio_logPL = np.log(PL).astype(np.float32)
-            n_loops = sum(1 for lt in loop_ts if abs(lt - t_obs) < 6 * 3600)
+            t_real_best = to_unix(best[1]["ts"])
+            n_loops = sum(1 for a, _ in loop_iv if abs(a - t_real_best) < 6 * 3600)   # loops passed in: +-1 h
             rels.append(0.5 if n_loops >= 3 else rel_cfg["audio_aircraft"])
             descs.append(f"jet noise peak {from_unix(t_obs):%H:%M:%S}Z stream (snr {best[1]['value'].get('snr_db')})")
         if not ts.complete:
             # we may be missing aircraft: only the positive part is trustworthy
             rels = [r * 0.8 for r in rels]
         ll = upsample(logP, clats, clons, GRID)
-        rel = float(np.clip(max(rels), 0.5, 0.75))
+        weak = self.is_weak(ev)
+        rel = float(np.clip(max(rels), 0.2, 0.5) if weak else np.clip(max(rels), 0.5, 0.75))
         group = self.event_group(ev)
         name = f"hw_aircraft_{ev['id']}"
         meta = dict(name=name, reliability=rel, independence_group=group,
@@ -1561,21 +1726,27 @@ class AircraftBridge(Analyzer):
                     sources=ts.sources or ["ADS-B"])
         path = None
         daily = None
+        # a flat layer (no aircraft visible/audible anywhere) is exactly neutral in the robust
+        # mixture (s = 1 -> L = 1): do not write a multi-MB file or report a spurious match
+        flat = float(np.ptp(logP)) < 1e-3
+        if flat:
+            meta["description"] += " -- no informative geometry, no layer written"
         if write and audio_logPL is not None:
             daily = self._accumulate_audio_day(ev, audio_logPL, (Lv, Lw), audio_offset)
             if daily is not None:
                 path, meta = daily
-        if write and daily is None:
+        if write and daily is None and not flat:
             path = write_layer(layers_dir(self.config) / f"aircraft_{ev['id']}.npz", ll, grid=GRID,
                                extra={"event_id": ev["id"], "kinds": sorted(by_kind), "t_capture": from_unix(ev["t_first"]),
                                       "complete": ts.complete, "n_aircraft": len(ts.tracks)}, **meta)
             if audio_logPL is not None:
                 self._accumulate_audio_day(ev, None, (Lv, Lw), audio_offset, per_event_path=path)
         # which aircraft explains the event best at the layer's maximum
-        i, j = np.unravel_index(np.nanargmax(logP), logP.shape)
-        audio_only = set(by_kind) == {"audio_aircraft"}
-        matches.append(self.explain(ts.tracks, ev["t_first"], float(CL[i, j]), float(CO[i, j]), Lv, Lw,
-                                    extra_delay=35.0 - 0.5 * float(self.get("reaction_s")) if audio_only else 0.0))
+        if not flat:
+            i, j = np.unravel_index(np.nanargmax(logP), logP.shape)
+            audio_only = set(by_kind) == {"audio_aircraft"}
+            matches.append(self.explain(ts.tracks, ev["t_first"], float(CL[i, j]), float(CO[i, j]), Lv, Lw,
+                                        extra_delay=35.0 - 0.5 * float(self.get("reaction_s")) if audio_only else 0.0))
         return {"status": "ok", "loglik": ll, "coarse": logP, "meta": meta, "path": str(path) if path else None,
                 "matches": [m for m in matches if m], "n_tracks": len(ts.tracks), "complete": ts.complete}
 
@@ -1656,10 +1827,11 @@ class AircraftBridge(Analyzer):
             if not aud:
                 continue
             if loops is None:
-                loops = [to_unix(r["ts"]) for r in db.observations(kind="audio_loop")]
-            tc, r = max(aud, key=lambda x: _num(x[1]["value"].get("snr_db"), 0.0))
-            if any(abs(to_unix(r["ts"]) - lt) <= float(self.get("loop_margin_s")) for lt in loops):
+                loops = self._loop_intervals(db.observations(kind="audio_loop"))
+            aud = [(tc, r) for tc, r in aud if not self._is_looped(to_unix(r["ts"]), loops)]
+            if not aud:
                 continue
+            tc, r = max(aud, key=lambda x: _num(x[1]["value"].get("snr_db"), 0.0))
             evs.append({"id": ev["id"], "t_obs": tc})
         return evs
 
@@ -1678,12 +1850,18 @@ class AircraftBridge(Analyzer):
         if audio_offset is None:
             audio_offset = float((db.calibration("audio_offset_s") if db else 0.0) or 0.0)
 
-        def tracks_for(ev):
-            return resolve_tracks(provs, ev["t_obs"] - 330.0, ev["t_obs"] + 30.0).tracks
+        W_a = float(self.get("audio_window_s"))
+        grid = np.arange(0.0, 120.0 + 1e-9, 0.5)
 
-        res = calibrate_latency(evs, la, lo, w, tracks_for, floor=float(self.get("audio_floor")),
+        def tracks_for(ev):
+            return resolve_tracks(provs, *audio_track_window(ev["t_obs"], grid, W_a)).tracks
+
+        res = calibrate_latency(evs, la, lo, w, tracks_for, grid=grid,
+                                bg_rate=float(self.get("audio_bg_rate_per_h")) / 3600.0, window_s=W_a,
                                 s50=float(self.get("audible_s50_km")), width=float(self.get("audible_width_km")),
-                                sound_speed=self.get("sound_speed"), min_events=int(self.get("calib_min_events")))
+                                sound_speed=self.get("sound_speed"), min_events=int(self.get("calib_min_events")),
+                                sigma_det=float(self.get("audio_sigma_det_s")),
+                                width_frac=float(self.get("audio_width_frac")), dt=float(self.get("audio_cpa_dt_s")))
         res["audio_offset_s"] = audio_offset
         res["latency_audio_s"] = res["latency_s"]
         res["latency_s"] = res["latency_s"] + audio_offset   # video latency = audio latency + audio offset
@@ -1763,8 +1941,22 @@ class AircraftBridge(Analyzer):
                             self.apply_calibration(ctx, res)
                     except Exception as e:
                         log.exception("latency calibration failed: %s", e)
+        self._prune_state(state, now)
         save_state(db, self.name, state)
         return out
+
+    def _prune_state(self, state, now):
+        """Forget events older than the lookback (they can no longer be collected) so the
+        state blob in the calibration table does not grow without bound."""
+        cutoff = now - float(self.get("lookback_h")) * 3600.0 - 86400.0
+        for key in ("done", "pending"):
+            for eid in list(state.get(key, {})):
+                try:
+                    t = datetime.strptime(eid, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC).timestamp()
+                except ValueError:
+                    continue
+                if t < cutoff:
+                    state[key].pop(eid, None)
 
     def _pool_get(self):
         if self._pool is None:
@@ -1799,9 +1991,10 @@ class AircraftBridge(Analyzer):
             obs.append(Observation("aircraft_match", t_ev, {**m, "event_id": eid, "layer": res["path"]},
                                    analyzer=self.name, confidence=float(res["meta"]["reliability"]),
                                    notes=res["meta"]["description"][:500]))
-        ctx.db.add_event(t_ev, "aircraft_layer", f"aircraft evidence {eid}: {res['meta']['description'][:200]}",
-                         {"event_id": eid, "path": res["path"], "matches": res["matches"],
-                          "reliability": res["meta"]["reliability"], "group": res["meta"]["independence_group"]})
+        if res.get("path"):   # no dashboard alert for a flat (uninformative) event
+            ctx.db.add_event(t_ev, "aircraft_layer", f"aircraft evidence {eid}: {res['meta']['description'][:200]}",
+                             {"event_id": eid, "path": res["path"], "matches": res["matches"],
+                              "reliability": res["meta"]["reliability"], "group": res["meta"]["independence_group"]})
         return obs
 
 
@@ -1819,6 +2012,7 @@ def main(argv=None):
     e.add_argument("--provider", nargs="*", default=["fixture", "trace_cache", "live_record", "adsblol_history", "opensky"])
     e.add_argument("--tilt", type=float, help="arm tilt in image, deg from vertical (negative = image left)")
     e.add_argument("--layers-dir")
+    e.add_argument("--cache-dir", help="ADS-B cache / daily audio accumulator root (default data/hordewatch)")
     r = sub.add_parser("record", help="record live ADS-B snapshots")
     r.add_argument("--poll", type=float, default=10.0)
     a = ap.parse_args(argv)
@@ -1830,6 +2024,8 @@ def main(argv=None):
     cfg = {"providers": a.provider, "async": False}
     if a.layers_dir:
         cfg["layers_dir"] = a.layers_dir
+    if a.cache_dir:
+        cfg["cache_dir"] = a.cache_dir
     b = AircraftBridge(cfg)
     tc = to_unix(parse_iso(a.stream_time))
     val = {} if a.tilt is None else {"tilt_deg_image": a.tilt}

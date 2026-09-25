@@ -108,6 +108,7 @@ aside.side { position: sticky; top: calc(var(--hdr-h, 49px) + 44px); display: fl
 table.data { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 table.data th { text-align: left; font-weight: 600; color: var(--text-2); font-size: 12.5px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 1; white-space: nowrap; }
 table.data td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.data td.num, table.data td.mono { white-space: nowrap; }
 table.data tr.clickable { cursor: pointer; }
 table.data tr.clickable:hover td { background: var(--surface-2); }
 table.data tr.fresh td { animation: fresh 2.5s ease-out; }
@@ -181,6 +182,7 @@ pre.json { margin: 6px 0 0; max-height: 280px; overflow: auto; background: var(-
 .chart-wrap.loading svg { opacity: .55; transition: opacity .2s; }
 svg text { font-family: var(--sans); }
 .ax-t { fill: var(--axis-text); font-size: 11px; font-variant-numeric: tabular-nums; }
+.halo { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
 .lane-t { fill: var(--text-2); font-size: 12px; font-weight: 600; }
 .leg-t { fill: var(--text-2); font-size: 11.5px; }
 .gridl { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
@@ -851,7 +853,7 @@ const refreshBoardsSoon = debounce(() => { if (loaded.boards) loadBoards(); }, 2
 /* =====================================================================================
    Timeline (inline SVG; small multiples sharing one time axis - never a dual axis)
    ===================================================================================== */
-const TL = { range: store.get('tlRange', '24h'), data: null, table: false, auto: true, last: 0, busy: false };
+const TL = { range: store.get('tlRange', '24h'), data: null, table: false, auto: true, last: 0, busy: false, pending: false };
 const TL_KINDS = new Set(['sky_photometry', 'scene_photometry', 'cloud_fraction', 'rain_visual', 'audio_rain', 'gesture_point_up', 'audio_aircraft', 'aircraft_light', 'aircraft_match',
   'audio_vehicle', 'audio_train', 'audio_gunshot', 'audio_chainsaw', 'audio_bells', 'audio_voice', 'audio_loop', 'ir_mode_switch', 'twilight_marker', 'night_light_event', 'whiteboard_text', 'clock_seen', 'stream_stall']);
 const LANES = [
@@ -861,21 +863,21 @@ const LANES = [
   { key: 'events', title: 'Events', markers: true },
 ];
 async function loadTimeline() {
-  if (TL.busy) return;
-  TL.busy = true; TL.last = Date.now();
+  if (TL.busy) { TL.pending = true; return; }       // a range change during a load re-runs it afterwards
+  TL.busy = true; TL.pending = false; TL.last = Date.now();
   $('#tl-wrap').classList.add('loading');
   const p = new URLSearchParams();
   if (TL.range === 'custom') {
     const f = osloLocalToUtcMs($('#tl-from').value), t = osloLocalToUtcMs($('#tl-to').value);
     if (f != null) p.set('since', new Date(f).toISOString());
     if (t != null) p.set('until', new Date(t).toISOString());
-  } else if (TL.range === 'all') p.set('since', '3650d');
+  } else if (TL.range === 'all') p.set('window', 'all');          // oldest -> newest observation
   else p.set('window', TL.range);
   try {
     TL.data = await api('api/timeline?' + p);
     renderTimeline();
   } catch (e) { toast('Timeline: ' + e.message); }
-  finally { TL.busy = false; $('#tl-wrap').classList.remove('loading'); }
+  finally { TL.busy = false; $('#tl-wrap').classList.remove('loading'); if (TL.pending) loadTimeline(); }
 }
 function niceTicks(lo, hi, n = 4) {
   const span = hi - lo || 1, step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
@@ -890,17 +892,31 @@ function nearest(points, t) {           // points sorted by [0]; binary search
 function renderTimeline() {
   const d = TL.data; if (!d) return;
   const svg = $('#tl-svg'), wrap = $('#tl-wrap');
-  const W = Math.max(320, wrap.clientWidth - 16), ML = 48, MR = 14, AX = 30;
+  const W = Math.max(300, wrap.clientWidth - 16), wide = W >= 700, ML = wide ? 112 : 58, MR = 14, AX = 30;
   const t0 = Date.parse(d.since), t1 = Date.parse(d.until), bucketMs = d.bucket_s * 1000;
   const X = t => ML + (t - t0) / (t1 - t0) * (W - ML - MR);
   const Tx = x => t0 + (x - ML) / (W - ML - MR) * (t1 - t0);
   const lanes = LANES.map(l => ({ ...l }));
   const ev = lanes.find(l => l.markers); ev.rows = d.lanes; ev.h = 26 + d.lanes.length * 24;
-  let y = 0; for (const l of lanes) { l.y = y; l.top = y + 24; l.bot = y + l.h - 8; y += l.h; }
+  const sun = d.sun;
+  let y = 0;
+  for (const l of lanes) {
+    l.title = l.key === 'sun' ? `${l.title} at ${sun.lat.toFixed(2)} N ${sun.lon.toFixed(2)} E` : l.title;
+    // legend items flow after the title and wrap onto extra lines when the chart is narrow
+    let lx = ML + l.title.length * 6.8 + 18, row = 0;
+    l.legend = [];
+    (l.series || []).forEach((k, i) => {
+      const s = d.series[k]; if (!s) return;
+      const text = `${s.label}${s.n ? '' : ' (no data)'}`, w = 34 + text.length * 6.3;
+      if (lx + w > W - MR && lx > ML) { row++; lx = ML; }
+      l.legend.push({ i, text, x: lx, dy: row * 17 }); lx += w;
+    });
+    l.h += row * 17;
+    l.y = y; l.top = y + 24 + row * 17; l.bot = y + l.h - 8; y += l.h;
+  }
   const H = y + AX;
   svg.replaceChildren(); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('height', H);
   const info = $('#tl-info');
-  const sun = d.sun;
   info.textContent = `${fmtT(d.since)} → ${fmtT(d.until)} Oslo · buckets ${d.bucket_s >= 60 ? (d.bucket_s / 60) + ' min' : d.bucket_s + ' s'} · sun at ${sun.lat.toFixed(3)} N ${sun.lon.toFixed(3)} E (${sun.source}; ${sun.model}). Shaded: sun below −6° (civil night).`;
   // civil-night shading across all lanes
   const sp = sun.points; let nStart = null;
@@ -926,37 +942,31 @@ function renderTimeline() {
   svg.append(sv('text', { class: 'ax-t', x: ML - 6, y: y + 13, 'text-anchor': 'end' }, 'Oslo'));
   const scales = {};
   for (const l of lanes) {
-    const title = l.key === 'sun' ? `${l.title} at ${sun.lat.toFixed(2)} N ${sun.lon.toFixed(2)} E` : l.title;
-    svg.append(sv('text', { class: 'lane-t', x: ML, y: l.y + 15 }, title));
-    l.legendX = ML + title.length * 6.8 + 18;
-    if (l.markers) { drawMarkerLane(svg, l, X, W, ML, MR); continue; }
+    svg.append(sv('text', { class: 'lane-t', x: ML, y: l.y + 15 }, l.title));
+    if (l.markers) { drawMarkerLane(svg, l, X, W, ML, MR, wide); continue; }
     let dom = l.domain, ticks = l.ticks;
     if (l.sun) { const v = sp.map(p => p[1]); const lo = Math.floor(Math.min(...v, -6) / 10) * 10, hi = Math.ceil(Math.max(...v, 0) / 10) * 10; dom = [lo, hi]; ticks = niceTicks(lo, hi, 4); }
     const Y = v => l.bot - (v - dom[0]) / (dom[1] - dom[0]) * (l.bot - l.top);
     scales[l.key] = Y;
     for (const tv of ticks) { svg.append(sv('line', { class: 'gridl', x1: ML, x2: W - MR, y1: Y(tv), y2: Y(tv) })); svg.append(sv('text', { class: 'ax-t', x: ML - 6, y: Y(tv) + 4, 'text-anchor': 'end' }, tv)); }
     if (l.sun) {
-      for (const [v, name] of [[0, 'horizon'], [-6, 'civil −6°']]) {
+      for (const [v, name, dy] of [[0, 'horizon 0°', -4], [-6, 'civil −6°', 12]]) {
         svg.append(sv('line', { class: 'refl', x1: ML, x2: W - MR, y1: Y(v), y2: Y(v) }));
-        svg.append(sv('text', { class: 'ax-t', x: W - MR - 2, y: Y(v) - 3, 'text-anchor': 'end' }, name));
+        svg.append(sv('text', { class: 'ax-t halo', x: ML + 6, y: Y(v) + dy }, name));
       }
       svg.append(sv('path', { class: 'ln c1', d: linePath(sp.map(p => [p[0], p[1]]), X, Y, Infinity) }));
       for (const c of sun.crossings) if (c.elev_deg > -7) svg.append(sv('circle', { class: 'mk f1', cx: X(c.t), cy: Y(c.elev_deg), r: 4 }));
       continue;
     }
     // legend (line keys) for multi-series lanes
-    let lx = l.legendX;
-    l.series.forEach((k, i) => {
-      const s = d.series[k]; if (!s) return;
-      const g = sv('g');
-      g.append(sv('line', { class: `ln c${i + 1}`, x1: lx, x2: lx + 14, y1: l.y + 11, y2: l.y + 11 }));
-      const t = sv('text', { class: 'leg-t', x: lx + 19, y: l.y + 15 }, `${s.label}${s.n ? '' : ' (no data)'}`);
-      g.append(t); svg.append(g); lx += 34 + (s.label.length + (s.n ? 0 : 10)) * 6.3;
-    });
+    for (const it of l.legend) {
+      svg.append(sv('line', { class: `ln c${it.i + 1}`, x1: it.x, x2: it.x + 14, y1: l.y + 11 + it.dy, y2: l.y + 11 + it.dy }));
+      svg.append(sv('text', { class: 'leg-t', x: it.x + 19, y: l.y + 15 + it.dy }, it.text));
+    }
     let any = false;
     l.series.forEach((k, i) => {
       const s = d.series[k]; if (!s || !s.points.length) return; any = true;
-      svg.append(sv('path', { class: `ln c${i + 1}`, d: linePath(s.points, X, Y, bucketMs * 3) }));
+      svg.append(sv('path', { class: `ln c${i + 1}`, d: linePath(s.points, X, Y, gapFor(s.points, bucketMs)) }));
       if (s.points.length === 1) svg.append(sv('circle', { class: `mk f${i + 1}`, cx: X(s.points[0][0]), cy: Y(s.points[0][1]), r: 4 }));
     });
     if (!any) svg.append(sv('text', { class: 'ax-t', x: (ML + W - MR) / 2, y: (l.top + l.bot) / 2, 'text-anchor': 'middle' }, 'no data in this window'));
@@ -988,7 +998,7 @@ function renderTimeline() {
       if (!l.series) continue;
       l.series.forEach((k, i) => {
         const s = d.series[k]; if (!s || !s.points.length) return;
-        const q = nearest(s.points, t); if (!q || Math.abs(q[0] - t) > bucketMs * 1.5) return;
+        const q = nearest(s.points, t); if (!q || Math.abs(q[0] - t) > Math.min(gapFor(s.points, bucketMs) / 2, 3 * 3600e3)) return;
         rows.push(el('div', { class: 'tr' }, el('i', { style: `background:var(--s${i + 1})` }), el('b', null, fmtNum(q[1], k.endsWith('luma') ? 1 : 2)), el('span', null, `${s.label}${q[2] > 1 ? ` (n=${q[2]})` : ''}`)));
       });
     }
@@ -1021,6 +1031,12 @@ function renderTimeline() {
   });
   if (TL.table) renderTimelineTable(); else $('#tl-tablewrap').classList.add('hidden');
 }
+function gapFor(points, bucketMs) {  // break a line only where a gap is clearly larger than the series' own cadence
+  if (points.length < 3) return Infinity;
+  const d = []; for (let i = 1; i < points.length; i++) d.push(points[i][0] - points[i - 1][0]);
+  d.sort((a, b) => a - b);
+  return Math.max(3 * bucketMs, 2.5 * d[d.length >> 1]);
+}
 function linePath(points, X, Y, gapMs) {
   let s = '', prev = null;
   for (const p of points) {
@@ -1030,11 +1046,14 @@ function linePath(points, X, Y, gapMs) {
   }
   return s || 'M0,0';
 }
-function drawMarkerLane(svg, l, X, W, ML, MR) {
+const SHORT_LANE = { aircraft: 'Aircraft', sounds: 'Sounds', light: 'Light/IR', board: 'Board', stream: 'Stream', alerts: 'Alerts' };
+function drawMarkerLane(svg, l, X, W, ML, MR, wide) {
   l.rows.forEach((lane, i) => {
     const cy = l.top + 6 + i * 24;
     svg.append(sv('line', { class: 'gridl', x1: ML, x2: W - MR, y1: cy, y2: cy }));
-    svg.append(sv('text', { class: 'leg-t', x: W - MR - 2, y: cy - 5, 'text-anchor': 'end' }, `${lane.label} · ${lane.n}`));
+    const lbl = sv('text', { class: 'leg-t', x: ML - 6, y: cy + 4, 'text-anchor': 'end' }, wide ? `${lane.label} (${lane.n})` : (SHORT_LANE[lane.key] || lane.label));
+    lbl.append(sv('title', null, `${lane.label}: ${lane.n} in this window (${lane.kinds.join(', ')})`));
+    svg.append(lbl);
     for (const m of lane.markers) {
       const c = sv('circle', { class: `mk f${(i % 6) + 1}`, cx: X(m.t), cy, r: m.status === 'new' || (m.conf ?? 0) >= 0.6 ? 5 : 4, 'data-mk': `${lane.key}:${m.t}:${m.id ?? m.event_id}` });
       svg.append(c);
@@ -1106,12 +1125,14 @@ function renderHotspotTable(h) {
   }
 }
 function renderLayers(L) {
-  $('#layers-dir').textContent = L.dir;
+  $('#layers-dir').textContent = L.dir + (L.warning ? ' - ' + L.warning : '');
+  if (L.warning) toast(L.warning);
   const tb = $('#layers-table tbody'); tb.replaceChildren();
   if (!L.layers.length) { tb.append(el('tr', null, el('td', { colspan: 7, class: 'muted' }, 'No live layers yet - bridges write them as evidence arrives.'))); return; }
   for (const l of L.layers) {
     if (l.error) { tb.append(el('tr', null, el('td', null, l.file), el('td', { colspan: 6, class: 'muted' }, 'unreadable: ' + l.error))); continue; }
-    tb.append(el('tr', null, el('td', { class: 'mono' }, l.name), el('td', { class: 'num' }, fmtNum(l.reliability)), el('td', { class: 'muted' }, l.independence_group || ''),
+    const probs = (l.problems || []).length ? el('div', { style: `color:var(${l.engine_ok === false ? '--crit-ink' : '--warn-ink'});font-size:12.5px` }, (l.engine_ok === false ? 'ENGINE WILL FAIL: ' : l.used_by_engine === false ? 'not used by the engine: ' : 'note: ') + l.problems.join('; ')) : null;
+    tb.append(el('tr', null, el('td', { class: 'mono' }, l.name, probs), el('td', { class: 'num' }, fmtNum(l.reliability)), el('td', { class: 'muted' }, l.independence_group || ''),
       el('td', { class: 'num' }, (l.n_cells || 0).toLocaleString('en-US')),
       el('td', null, l.peak ? el('a', { href: l.peak.norgeskart || l.peak.google_maps, target: '_blank', rel: 'noopener' }, `${l.peak.lat.toFixed(3)}, ${l.peak.lon.toFixed(3)}`) : '–'),
       el('td', null, fmtT(l.mtime, 'oslo', true, false)), el('td', { class: 'summary' }, l.description || '')));
@@ -1130,7 +1151,7 @@ function renderHistory(runs) {
 }
 function renderLeaflet() {
   const box = $('#leaf');
-  if (typeof window.L === 'undefined') { box.replaceChildren(el('div', { class: 'empty' }, 'Leaflet did not load (offline?). The hotspot table below still works; the engine map needs internet for tiles too.')); return; }
+  if (typeof window.L === 'undefined') { box.style.height = 'auto'; box.replaceChildren(el('div', { class: 'empty' }, 'Leaflet did not load (offline?). The hotspot table below still works; the engine map needs internet for tiles too.')); return; }
   if (!MAP.map) {
     MAP.map = L.map(box, { zoomControl: true, scrollWheelZoom: true }).setView([61.2, 10.9], 8);
     const topo = L.tileLayer('https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png', { maxZoom: 18, attribution: '© Kartverket' });
@@ -1213,12 +1234,13 @@ function renderCal(c) {
   const f2 = el('div', { class: 'form-row' }, num('cf-hd', 'heading_deg', att.heading_deg, '0.1', ...wa.heading_deg), num('cf-hs', 'heading σ', att.heading_sigma_deg, '0.1', ...wa.heading_sigma_deg),
     num('cf-pd', 'pitch_deg', att.pitch_deg, '0.1', ...wa.pitch_deg), num('cf-ps', 'pitch σ', att.pitch_sigma_deg, '0.1', ...wa.pitch_sigma_deg),
     num('cf-rd', 'roll_deg', att.roll_deg, '0.1', ...wa.roll_deg), num('cf-rs', 'roll σ', att.roll_sigma_deg, '0.1', ...wa.roll_sigma_deg),
+    el('label', null, 'measured at (Oslo, optional)', el('input', { type: 'datetime-local', id: 'cf-at', step: 60, style: 'width:200px', value: att.valid_at ? utcMsToOsloLocal(Date.parse(att.valid_at)) : '' })),
     el('button', { class: 'btn primary', onclick: saveAttitude }, 'Save level reference'));
   $('#cal-form').replaceChildren(
     el('p', { class: 'muted', style: 'margin:0 0 8px;font-size:12.5px' }, 'Overrides go into the calibration table and are logged as an alert (calibration_manual). The runner reads latency_s when it starts; bridges read calibration live. Automatic calibration (ADS-B aircraft, clocks) may overwrite them.'),
     el('div', { style: 'font-weight:600;margin:4px 0' }, 'Timing'), f1,
     el('div', { style: 'font-weight:600;margin:14px 0 4px' }, 'Camera level reference (used by the astro solver)'), f2,
-    el('p', { class: 'muted', style: 'margin:8px 0 0;font-size:12.5px' }, '1° of pitch or roll error moves an astro fix ~111 km: only enter values backed by a plumb line / horizon, with an honest σ.'));
+    el('p', { class: 'muted', style: 'margin:8px 0 0;font-size:12.5px' }, 'Give each angle together with its σ (the solver ignores an angle without σ, and a σ alone would pin the angle to 0°). 1° of pitch or roll error moves an astro fix ~111 km: only enter values backed by a plumb line / horizon, with an honest σ. "Measured at" ties the prior to the camera pose of that time (default: now).'));
   // evidence
   const tb = $('#cal-ev tbody'); tb.replaceChildren();
   if (!c.evidence.length) tb.append(el('tr', null, el('td', { colspan: 4, class: 'muted' }, 'No timing evidence yet.')));
@@ -1240,6 +1262,7 @@ async function saveAttitude() {
   const m = { heading_deg: 'cf-hd', heading_sigma_deg: 'cf-hs', pitch_deg: 'cf-pd', pitch_sigma_deg: 'cf-ps', roll_deg: 'cf-rd', roll_sigma_deg: 'cf-rs' }, v = {};
   for (const [k, id] of Object.entries(m)) { const x = $('#' + id).value; if (x !== '') v[k] = Number(x); }
   if (!Object.keys(v).length) { toast('Enter at least one value'); return; }
+  const at = osloLocalToUtcMs($('#cf-at').value); if (at != null) v.valid_at = new Date(at).toISOString();
   try { await postCal('camera_attitude', v); toast('Camera level reference saved', 'info', 2500); loadCal(); } catch (e) { toast('Save failed: ' + e.message); }
 }
 const refreshCalSoon = debounce(() => { if (activeTab === 'cal') loadCal(); }, 1500);
@@ -1250,7 +1273,7 @@ const refreshEventsSoon = debounce(loadEvents, 800);
    Live stream (SSE). EventSource reconnects by itself and sends Last-Event-ID; the server
    resumes from it. If the browser gives up (CLOSED), we reconnect with explicit cursors.
    ===================================================================================== */
-const SSE = { es: null, lastObs: null, lastEv: null, retry: 0 };
+const SSE = { es: null, lastObs: null, lastEv: null, retry: 0, connected: false };
 function connectSSE() {
   if (SSE.es) SSE.es.close();
   const q = SSE.lastObs != null ? `?since_obs=${SSE.lastObs}&since_event=${SSE.lastEv}` : '';
@@ -1258,8 +1281,17 @@ function connectSSE() {
   setChip('#chip-sse', 'idle', 'Connecting…');
   es.addEventListener('hello', e => {
     const h = JSON.parse(e.data); SSE.retry = 0;
-    if (SSE.lastObs == null) { SSE.lastObs = h.obs_cursor; SSE.lastEv = h.event_cursor; }
+    const reconnect = SSE.connected;
+    SSE.connected = true;
+    if (SSE.lastObs == null || h.gap) { SSE.lastObs = h.obs_cursor; SSE.lastEv = h.event_cursor; }
     setChip('#chip-sse', 'good', 'Live', `Live updates connected ${fmtT(h.server_time)} Oslo`);
+    // acks made elsewhere while we were away travel only over the live bus: re-read the alert list
+    if (reconnect) { loadEvents(); loadStatus(); }
+  });
+  es.addEventListener('gap', e => {
+    const g = JSON.parse(e.data);
+    if (g.skipped_obs > 0) toast(`Reconnected: skipped ${g.skipped_obs.toLocaleString('en-US')} older observations; tables reloaded`, 'info', 5000);
+    loadKinds(); loadObs(false); refreshBoardsSoon(); if (activeTab === 'timeline') loadTimeline();
   });
   es.addEventListener('observation', e => { const o = JSON.parse(e.data); SSE.lastObs = Math.max(SSE.lastObs ?? 0, o.id); onObservation(o); });
   es.addEventListener('event', e => { const v = JSON.parse(e.data); SSE.lastEv = Math.max(SSE.lastEv ?? 0, v.id); onEvent(v); });

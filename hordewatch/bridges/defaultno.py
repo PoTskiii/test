@@ -13,7 +13,9 @@ Mechanics
   bytes, sha256, content_type) and links.txt (every URL seen, cut URLs included
   even without --video).
 * The new snapshot is diffed with the previous *good* one (``diff_snapshots``,
-  pure): new/removed/changed files by sha256, new cut URLs (parsed to real
+  pure): new/removed/changed files by sha256 (a file missing from the manifest but
+  still in links.txt is a failed download, not a removal; a file already linked
+  before is not "new"), new cut URLs (parsed to real
   start/end times), and for changed JSON files an itemised diff of every list of
   records (sites, pins, areas: identity = id/name/title + rounded coordinates),
   so an event reads "steder.json: +2 (Ormsetra, Skramstad), -1 (Løten)".
@@ -142,8 +144,11 @@ def diff_snapshots(old_dir, new_dir, min_ratio=0.2):
     if len(new["files"]) < min_ratio * max(len(old["files"]), 1):
         return {"ok": False, "reason": f"snapshot has {len(new['files'])} files vs {len(old['files'])} before"}
     of, nf = old["files"], new["files"]
-    added = sorted(u for u in nf if u not in of)
-    removed = sorted(u for u in of if u not in nf)
+    # fetch_default_no.py skips URLs whose request failed (and stops at --max) but still lists every
+    # URL it discovered in links.txt: a file that is still linked is a fetch failure, not a removal,
+    # and a file that was already linked before is not new to the site
+    added = sorted(u for u in nf if u not in of and u not in old["links"])
+    removed = sorted(u for u in of if u not in nf and u not in new["links"])
     changed = sorted(u for u in nf if u in of and nf[u].get("sha256") != of[u].get("sha256"))
     old_cuts = {c["name"] for c in map(parse_cut, old["links"]) if c}
     new_cuts = sorted((c for c in map(parse_cut, new["links"]) if c and c["name"] not in old_cuts), key=lambda c: c["name"])
@@ -231,6 +236,12 @@ class DefaultNoPoller(Analyzer):
         cmd = self.get("cmd")
         if cmd:
             return list(cmd)
+        if self.snap_dir.resolve() != SNAP_DIR.resolve() and not getattr(self, "_warned_dir", False):
+            # fetch_default_no.py always writes to data/raw/defaultno_live/<stamp>/
+            self._warned_dir = True
+            log.warning("default.no poller: snapshots_dir %s differs from the fetch script's output dir %s; "
+                        "set 'cmd' to a fetcher that writes there, or new snapshots will never be seen",
+                        self.snap_dir, SNAP_DIR)
         c = [sys.executable, str(SCRIPT), "--max", str(int(self.get("max_files", 5000))), "--delay", "0.2"]
         if self.get("video", False):
             c.append("--video")
@@ -254,6 +265,10 @@ class DefaultNoPoller(Analyzer):
             return None
         if rc is None:
             self._proc.kill()
+            try:
+                self._proc.wait(timeout=10)
+            except Exception:
+                pass
             rc = -9
         self._proc = None
         self._logf.close()

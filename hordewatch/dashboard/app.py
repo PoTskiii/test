@@ -19,9 +19,15 @@ What the page shows
    geometric solar elevation at a reference point (the current #1 hotspot) with sunrise/sunset and
    civil/nautical twilight crossings, so a dusk IR switch or luma drop can be compared with the sun
    at a glance.
-5. Map (``/api/hotspots``, ``/api/layers``, ``/api/engine/history``, ``/output/map.html``).
+5. Map (``/api/hotspots``, ``/api/layers``, ``/api/engine/history``, ``/output/map.html``). Live layers
+   are described exactly as ``hordejakt.layers.live.build`` places them (its origin/cell-size rules, not
+   the file's claims), with the problems that would make the engine misplace, skip or crash on a file,
+   and a warning when the dashboard's layers dir is not the one the engine reads.
 6. Calibration (``/api/calibration``): stream latency, audio offset, camera model (config, priors,
    astro-solver fit and its implied attitude at the reference point) plus the timing evidence rows.
+   A manual ``camera_attitude`` must give each angle *with* its sigma (the solver merges the value over
+   {pitch 0+-15, roll 0+-3, heading None} and uses an axis only with its sigma, so an unpaired sigma
+   would pin the angle to 0); optional ``valid_at`` ties it to the camera pose of that time.
 
 Design and assumptions
 ----------------------
@@ -34,8 +40,15 @@ Design and assumptions
   the integer primary keys (``id > cursor``) every ``poll_s`` (default 1 s): the cost is O(new rows),
   independent of table size. The SSE ``id:`` field carries both cursors (``o<obs>.e<event>``); a
   browser that reconnects (EventSource does this by itself and sends ``Last-Event-ID``) resumes with
-  no gaps or duplicates. Event status changes made through this process are broadcast over an
-  in-process bus (single uvicorn worker assumed).
+  no gaps or duplicates. A resume more than ``max_replay`` (2000) observations behind (a laptop that
+  slept overnight) skips the older rows and sends one ``gap`` message so the page reloads its tables
+  instead of freezing on ~10^5 messages; alerts are always replayed in full. Event status changes made
+  through this process are broadcast over an in-process bus (single uvicorn worker assumed); the page
+  re-reads the alert list after every reconnect because that bus is not replayed.
+* Scale (a week of monitoring is ~10^6 observations). Kind/analyzer counts and the data time range are
+  aggregated incrementally over ``id > last seen`` (append-only table); the timeline aggregates its
+  buckets inside SQLite (exact integer-millisecond bucket edges, finite numbers only) with the Python
+  path as fallback when SQLite cannot parse a row's JSON; event lanes are thinned before summarising.
 * Time. Every stored timestamp is UTC ISO-8601 (CONTRACT.md). ``Observation.ts`` is the *estimated
   on-site* time (capture time - latency). The API returns ISO UTC plus ``ts_oslo`` (Europe/Oslo,
   DST-aware; fixed UTC+2 if tzdata is missing). ``delay_s`` = ts_capture - ts is the latency the
@@ -116,8 +129,16 @@ CAMERA_PRIORS = {
 CAL_NUMERIC = {"latency_s": (0.0, 900.0), "latency_sigma_s": (0.1, 900.0), "audio_offset_s": (-900.0, 900.0)}
 CAL_ATTITUDE = {"heading_deg": (0.0, 360.0), "pitch_deg": (-60.0, 60.0), "roll_deg": (-30.0, 30.0),
                 "heading_sigma_deg": (0.01, 180.0), "pitch_sigma_deg": (0.01, 45.0), "roll_sigma_deg": (0.01, 45.0)}
+# hordewatch.astro.solver._level merges camera_attitude over its defaults {pitch 0±15, roll 0±3, heading None}
+# and uses an axis only when its *_sigma_deg is set. So a value must come with its sigma (otherwise the weak
+# default sigma applies, or heading is dropped) and a sigma with its value (otherwise it pins the axis to 0).
+CAL_ATTITUDE_AXES = ("heading", "pitch", "roll")
+INTERNAL_CAL_PREFIXES = ("bridge_state:", "dashboard_state:")
+MAX_REPLAY_OBS = 2000          # SSE resume: replay at most this many observations, then send a 'gap'
+_NOT_INTERNAL = " AND ".join(f"substr(key, 1, {len(x)}) <> '{x}'" for x in INTERNAL_CAL_PREFIXES)
 
-# Timeline: continuous series (key, label, kind, SQL expression on `value`, python fallback, aggregate, lane)
+# Timeline: continuous series (key, label, kind, SQL expression on `value`, python fallback, aggregate, lane).
+# The rain aggregate is max so a short shower inside a bucket is not averaged away.
 SERIES = [
     ("sky_luma", "Sky luma", "sky_photometry", "json_extract(value,'$.luma')", lambda v: v.get("luma"), "mean", "luma"),
     ("scene_luma", "Scene luma", "scene_photometry", "json_extract(value,'$.luma')", lambda v: v.get("luma"), "mean", "luma"),
@@ -131,6 +152,18 @@ SERIES = [
     ("sunlit_fraction", "Sunlit fraction", "direct_sun", "json_extract(value,'$.sunlit_fraction')",
      lambda v: v.get("sunlit_fraction"), "mean", None),
 ]
+# Rows of a series kind that are not measurements. analyzers/sky.py also stores its twilight markers as
+# sky_photometry (region 'twilight_marker', luma = the crossing *threshold*, ts = interpolated crossing
+# time, often IR-mode luma); averaging them into the measured sky luma would bias the curve at dusk/dawn.
+SERIES_FILTER = {
+    "sky_luma": ("COALESCE(json_extract(value,'$.region'),'') <> 'twilight_marker'",
+                 lambda v: v.get("region") != "twilight_marker"),
+}
+# unix seconds of an ISO-8601 column inside SQLite (julianday understands the '+00:00' suffix; its double
+# carries ~1e-5 s of rounding error, so bucket indices use SQL_UNIX_MS: exact integer milliseconds, which is
+# the resolution of every timestamp hordewatch writes)
+SQL_UNIX = "((julianday({col}) - 2440587.5) * 86400.0)"
+SQL_UNIX_MS = "CAST(ROUND((julianday({col}) - 2440587.5) * 86400000.0) AS INTEGER)"
 # Timeline: discrete event swim-lanes (key, label, kinds)
 EVENT_LANES = [
     ("aircraft", "Aircraft cues", ["gesture_point_up", "audio_aircraft", "aircraft_light", "aircraft_match"]),
@@ -382,22 +415,39 @@ def sun_position(unix_s, lat_deg: float, lon_deg: float):
     return alt, az % 360.0
 
 
-def sun_crossings(t0: float, t1: float, lat: float, lon: float, step_s: float = 60.0):
+def sun_crossings(t0: float, t1: float, lat: float, lon: float, step_s: float = 600.0, max_steps: int = 400_000):
     """Times the sun crosses the sunrise/sunset (-0.833 deg: refraction + semi-diameter), civil (-6)
-    and nautical (-12) thresholds in [t0, t1], linearly interpolated on a 1-min grid (error < 1 s)."""
-    if t1 <= t0:
+    and nautical (-12) thresholds in [t0, t1] (geometric elevation, see :func:`sun_position`).
+
+    Method: sign changes on a coarse grid (``step_s``, 10 min) bracket each crossing, then a vectorised
+    bisection (24 halvings: < 0.1 ms) pins it down. The bracket width stays <= step_s for any span up to
+    ``max_steps * step_s`` (7.6 years), so accuracy does not degrade for long ranges (an earlier fixed
+    point count made a 10-year range sample the sun every 2.4 days). A double crossing inside one step
+    (the sun grazing a threshold within minutes) can be missed; at 58-65 N that needs the daily extreme
+    to lie within ~0.01 deg of the threshold."""
+    if not (t1 > t0):
         return []
-    n = int(min(20000, max(2, (t1 - t0) / step_s + 1)))
+    n = int(min(max_steps, max(2, math.ceil((t1 - t0) / step_s) + 1)))
     ts = np.linspace(t0, t1, n)
     alt, _ = sun_position(ts, lat, lon)
     out = []
     for h0, rising, setting in SUN_THRESHOLDS:
         d = alt - h0
-        idx = np.nonzero(np.sign(d[:-1]) * np.sign(d[1:]) < 0)[0]
-        for i in idx:
-            f = d[i] / (d[i] - d[i + 1])
-            t = ts[i] + f * (ts[i + 1] - ts[i])
-            out.append({"t": int(round(t * 1000)), "event": rising if d[i + 1] > d[i] else setting, "elev_deg": h0})
+        neg = d < 0
+        idx = np.nonzero(neg[:-1] != neg[1:])[0]
+        if idx.size == 0:
+            continue
+        a, b = ts[idx].copy(), ts[idx + 1].copy()
+        a_neg = neg[idx].copy()
+        for _ in range(24):
+            m = 0.5 * (a + b)
+            m_neg = (sun_position(m, lat, lon)[0] - h0) < 0
+            same = m_neg == a_neg
+            a = np.where(same, m, a)
+            b = np.where(same, b, m)
+        tc = 0.5 * (a + b)
+        for t, rise in zip(tc, a_neg):          # below the threshold before the crossing = rising
+            out.append({"t": int(round(float(t) * 1000)), "event": rising if rise else setting, "elev_deg": h0})
     return sorted(out, key=lambda e: e["t"])
 
 
@@ -484,7 +534,8 @@ class Store:
         self.bus = Bus()
         self._frame_samples = deque(maxlen=400)
         self._layer_cache: dict = {}
-        self._kinds_cache = (0.0, None)
+        self._agg_lock = threading.Lock()
+        self._agg = _empty_agg()
         self.sse_clients = 0
         try:
             with self.connect() as con:
@@ -630,9 +681,10 @@ class Store:
         if until:
             where.append("o.ts <= ?")
             args.append(until)
-        if q:
-            where.append("(o.value LIKE ? OR o.notes LIKE ? OR o.kind LIKE ? OR o.analyzer LIKE ?)")
-            args += [f"%{q}%"] * 4
+        if q:   # literal substring search: % and _ typed by the user are not wildcards
+            where.append("(o.value LIKE ? ESCAPE '\\' OR o.notes LIKE ? ESCAPE '\\' OR o.kind LIKE ? ESCAPE '\\' "
+                         "OR o.analyzer LIKE ? ESCAPE '\\')")
+            args += [f"%{_like_escape(q)}%"] * 4
         if order == "ts":
             if before_ts:
                 where.append("(o.ts < ? OR (o.ts = ? AND o.id < ?))")
@@ -660,29 +712,44 @@ class Store:
             r = con.execute(self.OBS_SQL + " WHERE o.id = ?", (obs_id,)).fetchone()
         return self.obs_dict(r, full=True) if r else None
 
+    def aggregates(self):
+        """Per-kind and per-analyzer counts / time ranges, maintained incrementally.
+
+        The observations table is append-only with an integer primary key, so the aggregates are
+        computed once with one GROUP BY (a full scan: ~2 s for 1.2 M rows) and afterwards only over
+        ``id > last_max_id`` (O(new rows)). The earlier per-request GROUP BYs cost that full scan on
+        every /api/kinds call and every timeline load (MIN/MAX(ts) has no usable index). If MAX(id)
+        ever decreases (DB replaced, rows deleted) the aggregates are rebuilt from scratch."""
+        with self._agg_lock:
+            with self.connect() as con:
+                mx = con.execute("SELECT MAX(id) FROM observations").fetchone()[0] or 0
+                if mx < self._agg["max_id"]:
+                    self._agg = _empty_agg()
+                lo = self._agg["max_id"]
+                if mx > lo:
+                    rows = con.execute("SELECT kind, analyzer, COUNT(*), MIN(ts), MAX(ts), MAX(created) FROM observations "
+                                       "WHERE id > ? AND id <= ? GROUP BY kind, analyzer", (lo, mx)).fetchall()
+                    for kind, an, n, t_min, t_max, created in rows:
+                        _agg_merge(self._agg["kinds"], kind, n, t_min, t_max, created)
+                        _agg_merge(self._agg["analyzers"], an, n, t_min, t_max, created)
+                    self._agg["max_id"] = mx
+            return {"max_id": self._agg["max_id"], "kinds": {k: list(v) for k, v in self._agg["kinds"].items()},
+                    "analyzers": {k: list(v) for k, v in self._agg["analyzers"].items()}}
+
     def kinds(self):
-        now = time.monotonic()
-        if self._kinds_cache[1] is not None and now - self._kinds_cache[0] < 5.0:
-            return self._kinds_cache[1]
-        with self.connect() as con:
-            rows = con.execute("SELECT kind, COUNT(*) AS n, MAX(ts) AS last_ts, MAX(created) AS last_created "
-                               "FROM observations GROUP BY kind").fetchall()
-            an = con.execute("SELECT analyzer, COUNT(*) AS n, MAX(created) AS last_created FROM observations "
-                             "GROUP BY analyzer ORDER BY analyzer").fetchall()
-        seen = {r["kind"]: r for r in rows}
+        agg = self.aggregates()
+        seen = agg["kinds"]
         kinds = []
         for k, desc in KINDS.items():
             r = seen.get(k)
-            kinds.append({"kind": k, "description": desc, "n": r["n"] if r else 0,
-                          "last_ts": r["last_ts"] if r else None, "last_created": r["last_created"] if r else None})
-        for k, r in seen.items():
+            kinds.append({"kind": k, "description": desc, "n": r[0] if r else 0,
+                          "last_ts": r[2] if r else None, "last_created": r[3] if r else None})
+        for k, r in sorted(seen.items(), key=lambda kv: str(kv[0])):
             if k not in KINDS:
-                kinds.append({"kind": k, "description": "(not in types.KINDS)", "n": r["n"], "last_ts": r["last_ts"],
-                              "last_created": r["last_created"]})
-        res = {"kinds": kinds, "analyzers": [{"analyzer": r["analyzer"], "n": r["n"], "last_created": r["last_created"]}
-                                             for r in an]}
-        self._kinds_cache = (now, res)
-        return res
+                kinds.append({"kind": k, "description": "(not in types.KINDS)", "n": r[0], "last_ts": r[2],
+                              "last_created": r[3]})
+        return {"kinds": kinds, "analyzers": [{"analyzer": a, "n": r[0], "last_created": r[3]}
+                                              for a, r in sorted(agg["analyzers"].items(), key=lambda kv: str(kv[0]))]}
 
     # ------------------------------------------------------------------ events
     @staticmethod
@@ -728,10 +795,11 @@ class Store:
             args.append(kind)
         with self.connect() as con:
             ids = [r[0] for r in con.execute("SELECT id FROM events WHERE " + " AND ".join(where), args)]
-        if ids:
-            self._write("UPDATE events SET status='ack' WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)
-            for i in ids:
-                self.bus.publish("event_update", {"id": i, "status": "ack"})
+        for k in range(0, len(ids), 500):     # bounded parameter lists (SQLite variable limit)
+            chunk = ids[k:k + 500]
+            self._write("UPDATE events SET status='ack' WHERE id IN (%s)" % ",".join("?" * len(chunk)), chunk)
+        for i in ids:
+            self.bus.publish("event_update", {"id": i, "status": "ack"})
         return ids
 
     # ------------------------------------------------------------------ whiteboard
@@ -845,9 +913,11 @@ class Store:
 
     # ------------------------------------------------------------------ timeline
     def data_range(self):
-        with self.connect() as con:
-            r = con.execute("SELECT MIN(ts), MAX(ts) FROM observations").fetchone()
-        return r[0], r[1]
+        """(MIN(ts), MAX(ts)) over all observations, from the incremental aggregates."""
+        ks = [v for v in self.aggregates()["kinds"].values() if v[1] is not None]
+        if not ks:
+            return None, None
+        return min(v[1] for v in ks), max(v[2] for v in ks)
 
     def sun_ref(self):
         if self.sun_ref_cfg and len(self.sun_ref_cfg) == 2:
@@ -861,59 +931,100 @@ class Store:
                 continue
         return DEFAULT_SUN_REF[0], DEFAULT_SUN_REF[1], "default reference point"
 
-    def _series(self, con, kind, expr, fn, lo, hi):
-        if self.json1:
-            try:
-                rows = con.execute(f"SELECT ts, {expr} FROM observations WHERE kind=? AND ts BETWEEN ? AND ?",
-                                   (kind, lo, hi)).fetchall()
-                t = np.array([unix_of(a) for a, _ in rows], float)
-                v = np.array([_float(b) for _, b in rows], float)
-                return t, v
-            except sqlite3.Error:
-                pass
+    def _series_py(self, con, key, kind, fn, lo, hi):
+        """Raw (t, v) samples of one series, parsed in Python (fallback path)."""
+        keep = SERIES_FILTER.get(key, (None, None))[1]
         rows = con.execute("SELECT ts, value FROM observations WHERE kind=? AND ts BETWEEN ? AND ?", (kind, lo, hi)).fetchall()
         t, v = [], []
         for a, b in rows:
             d = _loads(b)
+            if not isinstance(d, dict) or (keep is not None and not keep(d)):
+                continue
             try:
-                v.append(_float(fn(d)) if isinstance(d, dict) else np.nan)
+                v.append(_float(fn(d)))
             except Exception:
                 v.append(np.nan)
             t.append(unix_of(a))
         return np.array(t, float), np.array(v, float)
 
+    def _series_sql(self, con, key, kind, expr, agg, lo, hi, t0, b, t1):
+        """Bucketed series aggregated inside SQLite -> (points, n) with exactly the semantics of
+        :func:`_bucketize` (bucket k = floor((t - t0) / b), the last bucket clipped to the window, only
+        numeric values count). Returns one row per non-empty bucket instead of every sample, which is
+        what keeps a multi-day window fast (the Python path parsed ~10^5 timestamps per series).
+        Raises sqlite3.Error when a row holds JSON SQLite cannot parse (e.g. a NaN written by Python's
+        json on an SQLite without JSON5); the caller then falls back to the Python path."""
+        t0_ms, b_ms = int(round(t0 * 1000)), max(1, int(round(b * 1000)))
+        kmax = max(1, -(-(int(round(t1 * 1000)) - t0_ms) // b_ms)) - 1
+        extra = SERIES_FILTER.get(key, (None, None))[0]
+        # integer division of non-negative integers = floor: exact bucket edges, no float drift
+        sql = (f"SELECT k, AVG(v), MAX(v), COUNT(v) FROM ("
+               f" SELECT MIN(({SQL_UNIX_MS.format(col='ts')} - ?) / ?, ?) AS k, {expr} AS v"
+               f" FROM observations WHERE kind = ? AND ts BETWEEN ? AND ?{' AND ' + extra if extra else ''}"
+               # LIMIT -1 stops the query flattener from substituting `v` into each outer reference,
+               # which re-ran json_extract 4x per row (SQLite flattening rule 13)
+               # finite numbers only: SQLite >= 3.42 reads Python's 'Infinity' (JSON5) as a real inf,
+               # which would turn the whole bucket mean into inf; NaN already arrives as NULL
+               f" LIMIT -1) WHERE k >= 0 AND typeof(v) IN ('integer', 'real') AND abs(v) <= 1.7976931348623157e308"
+               f" GROUP BY k ORDER BY k")
+        out, n = [], 0
+        for k, mean, mx, cnt in con.execute(sql, (t0_ms, b_ms, kmax, kind, lo, hi)):
+            val = mx if agg == "max" else mean
+            if val is None or not math.isfinite(float(val)):
+                continue
+            a = t0 + k * b
+            e = min(a + b, t1)
+            out.append([int(round(0.5 * (a + e) * 1000)), round(float(val), 4), int(cnt)])
+            n += int(cnt)
+        return out, n
+
     def timeline(self, since=None, until=None, bucket_s=None, sun_lat=None, sun_lon=None, max_markers=1500,
-                 window_s=86400.0):
+                 window_s: Optional[float] = 86400.0):
         """Chart data for [since, until]. Defaults: until = newest observation (so replays of old
-        recordings work too), since = until - window_s. Continuous series are bucketed (mean, or max for
-        rain) to ~1200 buckets; markers are thinned per time bin keeping the most confident."""
+        recordings work too), since = until - window_s, or the oldest observation when window_s is None
+        ('all'). Continuous series are bucketed (mean, or max for rain) to ~1200 buckets; markers are
+        thinned per time bin keeping the most confident."""
         dmin, dmax = self.data_range()
         now = utcnow()
         hi = until or dmax or iso(now)
         if until is None and since is not None and hi <= since:
             hi = max(iso(now), since)          # 'last 6 h' although the newest data is older
-        lo = since or iso(parse_iso(hi) - timedelta(seconds=float(window_s)))
+        if since:
+            lo = since
+        elif window_s is None:                 # 'all': from the oldest observation
+            lo = dmin if dmin and dmin < hi else iso(parse_iso(hi) - timedelta(days=1))
+        else:
+            lo = iso(parse_iso(hi) - timedelta(seconds=float(window_s)))
         t0, t1 = unix_of(lo), unix_of(hi)
         if t1 <= t0:
             raise ValueError("until must be after since")
         span = t1 - t0
         b = float(bucket_s) if bucket_s else _nice_bucket(span)
-        b = max(b, 1.0)
+        b = round(max(b, 1.0, span / 20000.0), 3)   # never more than 20000 buckets per series; whole ms
         series = {}
         with self.connect() as con:
             for key, label, kind, expr, fn, agg, lane in SERIES:
-                t, v = self._series(con, kind, expr, fn, lo, hi)
-                series[key] = {"label": label, "kind": kind, "agg": agg, "lane": lane, "n": int(np.isfinite(v).sum()),
-                               "points": _bucketize(t, v, t0, b, agg, t1)}
+                pts = None
+                if self.json1:
+                    try:
+                        pts, n = self._series_sql(con, key, kind, expr, agg, lo, hi, t0, b, t1)
+                    except sqlite3.Error:
+                        pts = None
+                if pts is None:
+                    t, v = self._series_py(con, key, kind, fn, lo, hi)
+                    pts, n = _bucketize(t, v, t0, b, agg, t1), int(np.isfinite(v).sum())
+                series[key] = {"label": label, "kind": kind, "agg": agg, "lane": lane, "n": n, "points": pts}
             lanes = []
             for key, label, kinds in EVENT_LANES:
-                rows = con.execute("SELECT id, ts, kind, confidence, value FROM observations WHERE kind IN (%s) "
-                                   "AND ts BETWEEN ? AND ? ORDER BY ts LIMIT 50000" % ",".join("?" * len(kinds)),
+                rows = con.execute(f"SELECT id, {SQL_UNIX.format(col='ts')} AS u, kind, confidence, value FROM observations "
+                                   f"WHERE kind IN ({','.join('?' * len(kinds))}) AND ts BETWEEN ? AND ? ORDER BY ts LIMIT 50000",
                                    (*kinds, lo, hi)).fetchall()
-                marks = [{"t": int(round(unix_of(r["ts"]) * 1000)), "id": r["id"], "kind": r["kind"],
-                          "conf": r["confidence"], "label": summarize_value(r["kind"], _loads(r["value"]))} for r in rows]
-                lanes.append({"key": key, "label": label, "kinds": kinds, "n": len(marks),
-                              "markers": _thin(marks, max_markers, span)})
+                marks = [{"t": int(round(r["u"] * 1000)), "id": r["id"], "kind": r["kind"], "conf": r["confidence"],
+                          "_v": r["value"]} for r in rows if r["u"] is not None]
+                kept = _thin(marks, max_markers, span)
+                for m in kept:                 # summarise only what is sent (json.loads per row was the hot path)
+                    m["label"] = summarize_value(m["kind"], _loads(m.pop("_v")))
+                lanes.append({"key": key, "label": label, "kinds": kinds, "n": len(marks), "markers": kept})
             ev = con.execute("SELECT id, ts, kind, summary, status FROM events WHERE ts BETWEEN ? AND ? ORDER BY ts LIMIT 20000",
                              (lo, hi)).fetchall()
             lanes.append({"key": "alerts", "label": "Alerts", "kinds": ["events"], "n": len(ev),
@@ -983,8 +1094,17 @@ class Store:
                                 if isinstance(top, dict) else None)})
         return out
 
+    def engine_layers_dir(self) -> Path:
+        """The directory hordejakt.layers.live actually reads (fixed in the engine, not configurable)."""
+        try:
+            from hordejakt.layers import live
+            return Path(live.LIVE_DIR)
+        except Exception:  # pragma: no cover
+            return DEFAULT_LAYERS
+
     def layers(self):
-        """Live evidence grids in the layers dir: metadata + where each one peaks (cached by mtime)."""
+        """Live evidence grids in the layers dir: metadata + where each one peaks *as the engine places
+        it* + problems that would make the engine misplace, skip or crash on it (cached by mtime)."""
         if not self.layers_dir.is_dir():
             return []
         from hordejakt.grid import GRID
@@ -1029,7 +1149,7 @@ class Store:
         ac = val("astro_camera")
         if isinstance(ac, dict):
             camera["astro_camera"] = self._astro_camera_summary(ac, (lf or {}).get("w"))
-        internal = [k for k in cal if k.startswith(("bridge_state:", "dashboard_state:"))]
+        internal = [k for k in cal if k.startswith(INTERNAL_CAL_PREFIXES)]
         return {"latency": latency, "camera": camera, "latest_frame": lf,
                 "evidence": [self.obs_dict(r) for r in ev],
                 "rows": [{"key": k, "value": v["value"], "updated": v["updated"], "updated_oslo": to_oslo(v["updated"])}
@@ -1115,6 +1235,15 @@ class Store:
         return round((n1 - n0) / ((t1 - t0) / 60.0), 2)
 
     # ------------------------------------------------------------------ SSE polling
+    def timing_calibration(self) -> dict:
+        """latency_s / latency_sigma_s / audio_offset_s read on a fresh connection (safe from any thread)."""
+        with self.connect() as con:
+            rows = dict(con.execute("SELECT key, value FROM calibration WHERE key IN "
+                                    "('latency_s','latency_sigma_s','audio_offset_s')").fetchall())
+            upd = con.execute("SELECT MAX(updated) FROM calibration WHERE " + _NOT_INTERNAL).fetchone()[0]
+        return {"latency_s": _loads(rows.get("latency_s")), "latency_sigma_s": _loads(rows.get("latency_sigma_s")),
+                "audio_offset_s": _loads(rows.get("audio_offset_s")), "updated": upd}
+
     def max_ids(self):
         with self.connect() as con:
             o = con.execute("SELECT MAX(id) FROM observations").fetchone()[0] or 0
@@ -1136,7 +1265,9 @@ class Store:
             erows = con.execute("SELECT * FROM events WHERE id > ? AND id <= ? ORDER BY id LIMIT ?",
                                 (cur_ev, me, limit)).fetchall() if me > cur_ev else []
             fmax = con.execute("SELECT MAX(id) FROM frames").fetchone()[0] or 0
-            cal = tuple(con.execute("SELECT MAX(updated), COUNT(*) FROM calibration").fetchone())
+            # bridges persist their state (bridge_state:*) and the ntfy cursor in this table every few
+            # seconds; only real calibrations may trigger a 'calibration' message
+            cal = tuple(con.execute("SELECT MAX(updated), COUNT(*) FROM calibration WHERE " + _NOT_INTERNAL).fetchone())
         new_o = orows[-1]["id"] if len(orows) == limit else max(cur_obs, mo)
         new_e = erows[-1]["id"] if len(erows) == limit else max(cur_ev, me)
         self._sample_frames(fmax)
@@ -1145,6 +1276,26 @@ class Store:
 
 
 # =============================================================================== module helpers
+def _empty_agg() -> dict:
+    return {"max_id": 0, "kinds": {}, "analyzers": {}}
+
+
+def _agg_merge(d: dict, key, n, t_min, t_max, created):
+    """Merge one GROUP BY row into d[key] = [n, min_ts, max_ts, max_created] (ISO strings compare in time order)."""
+    cur = d.get(key)
+    if cur is None:
+        d[key] = [int(n), t_min, t_max, created]
+        return
+    cur[0] += int(n)
+    cur[1] = t_min if cur[1] is None else (cur[1] if t_min is None else min(cur[1], t_min))
+    cur[2] = t_max if cur[2] is None else (cur[2] if t_max is None else max(cur[2], t_max))
+    cur[3] = created if cur[3] is None else (cur[3] if created is None else max(cur[3], created))
+
+
+def _like_escape(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _resolve(p) -> Path:
     p = Path(p)
     return p if p.is_absolute() else ROOT / p
@@ -1196,25 +1347,88 @@ def _thin(marks: list, max_n: int, span_s: float) -> list:
 
 
 def _layer_info(p: Path, grid) -> dict:
+    """Describe one live layer file the way ``hordejakt.layers.live.build`` will use it.
+
+    The engine's rules (replicated, not re-imagined): a ``loglik`` with the full GRID shape is used on
+    GRID as is (any lat_min/lon_min/dlat/dlon in the file are *ignored*); any other shape is a sub-grid
+    pasted at ``GRID.index(lat_min, lon_min)`` (origin snapped to the nearest cell, *GRID's* cell size,
+    clipped at the grid edge) and skipped when the origin lies outside GRID. So the peak reported here
+    is where the posterior will actually feel it; honouring the file's own dlat/dlon (as this function
+    once did) would show a peak the engine never uses. Files the engine would crash on (no ``meta``,
+    meta without ``name``, sub-grid without an origin) are flagged with ``engine_ok: False``."""
+    problems, fatal = [], False
     with np.load(p, allow_pickle=False) as d:
-        meta = json.loads(str(d["meta"])) if "meta" in d.files else {}
+        files = set(d.files)
+        meta_raw = str(d["meta"]) if "meta" in files else None
         ll = np.asarray(d["loglik"], float)
-        lat0 = float(d["lat_min"]) if "lat_min" in d.files else grid.lat_min
-        lon0 = float(d["lon_min"]) if "lon_min" in d.files else grid.lon_min
-        dlat = float(d["dlat"]) if "dlat" in d.files else grid.dlat
-        dlon = float(d["dlon"]) if "dlon" in d.files else grid.dlon
-    fin = np.isfinite(ll)
-    info = {"file": p.name, "name": meta.get("name", p.stem), "reliability": meta.get("reliability"),
-            "independence_group": meta.get("independence_group"), "description": meta.get("description", ""),
+        f = {k: float(d[k]) for k in ("lat_min", "lon_min", "dlat", "dlon") if k in files}
+    meta = {}
+    if meta_raw is None:
+        problems.append("no 'meta' array: hordejakt.layers.live raises KeyError and the whole engine run fails")
+        fatal = True
+    else:
+        try:
+            meta = json.loads(meta_raw)
+            if not isinstance(meta, dict):
+                raise ValueError("not an object")
+        except ValueError as e:
+            problems.append(f"meta is not a JSON object ({e}): the engine run fails")
+            meta, fatal = {}, True
+    if meta_raw is not None and not fatal and "name" not in meta:
+        problems.append("meta has no 'name': hordejakt.layers.live raises KeyError and the engine run fails")
+        fatal = True
+    if ll.ndim != 2:
+        problems.append(f"loglik must be 2-D, got shape {list(ll.shape)}")
+        fatal = True
+    i0 = j0 = 0
+    placed = not fatal
+    if placed and ll.shape == tuple(grid.shape):
+        if ("lat_min" in f and abs(f["lat_min"] - grid.lat_min) > 1e-9) or ("lon_min" in f and abs(f["lon_min"] - grid.lon_min) > 1e-9):
+            problems.append("full-GRID shape: the engine ignores lat_min/lon_min in the file and uses GRID's origin")
+    elif placed:
+        if "lat_min" not in f or "lon_min" not in f:
+            problems.append("sub-grid without lat_min/lon_min: hordejakt.layers.live raises KeyError and the engine run fails")
+            placed, fatal = False, True
+        else:
+            ii, jj = grid.index(f["lat_min"], f["lon_min"])
+            i0, j0 = int(ii), int(jj)
+            if i0 < 0 or j0 < 0:
+                problems.append("sub-grid origin outside GRID: the engine skips this layer")
+                placed = False
+            else:
+                off = max(abs(grid.lat_min + i0 * grid.dlat - f["lat_min"]) / grid.dlat,
+                          abs(grid.lon_min + j0 * grid.dlon - f["lon_min"]) / grid.dlon)
+                if off > 1e-3:
+                    problems.append(f"sub-grid origin is not on a GRID cell centre: the engine snaps it by up to {off:.2f} cells")
+    if placed and ll.shape != tuple(grid.shape) and (("dlat" in f and abs(f["dlat"] - grid.dlat) > 1e-9)
+                                                     or ("dlon" in f and abs(f["dlon"] - grid.dlon) > 1e-9)):
+        problems.append(f"cell size {f.get('dlat')}x{f.get('dlon')} differs from GRID {grid.dlat}x{grid.dlon}: the engine "
+                        "pastes it with GRID cells, so the evidence lands in the wrong place")
+    used = np.full((0, 0), np.nan)
+    if placed:
+        h = min(ll.shape[0], grid.nlat - i0)
+        w = min(ll.shape[1], grid.nlon - j0)
+        used = ll[:h, :w]
+        if (h, w) != ll.shape:
+            problems.append(f"clipped at the GRID edge: {ll.shape[0] * ll.shape[1] - h * w} cells are not used")
+    fin = np.isfinite(used)
+    try:
+        rel = float(meta.get("reliability", 0.5))
+    except (TypeError, ValueError):
+        rel, fatal = None, True
+        problems.append("reliability is not a number: the engine run fails")
+    info = {"file": p.name, "name": meta.get("name", p.stem), "reliability": rel,
+            "independence_group": meta.get("independence_group", meta.get("name")), "description": meta.get("description", ""),
             "sources": meta.get("sources", []), "shape": list(ll.shape), "n_cells": int(fin.sum()), "peak": None,
-            "range": None}
+            "range": None, "engine_ok": not fatal, "used_by_engine": placed and not fatal, "problems": problems,
+            "origin_cell": [i0, j0] if placed else None}
     if fin.any():
-        i, j = np.unravel_index(np.nanargmax(np.where(fin, ll, -np.inf)), ll.shape)
-        lat, lon = lat0 + i * dlat, lon0 + j * dlon
+        i, j = np.unravel_index(np.argmax(np.where(fin, used, -np.inf)), used.shape)
+        lat, lon = grid.lat_min + (i0 + i) * grid.dlat, grid.lon_min + (j0 + j) * grid.dlon
         nk, gm = map_links(lat, lon)
-        info["peak"] = {"lat": round(lat, 4), "lon": round(lon, 4), "loglik": round(float(ll[i, j]), 3),
+        info["peak"] = {"lat": round(lat, 4), "lon": round(lon, 4), "loglik": round(float(used[i, j]), 3),
                         "norgeskart": nk, "google_maps": gm}
-        info["range"] = round(float(np.nanmax(ll) - np.nanmin(ll)), 3)
+        info["range"] = round(float(np.max(used[fin]) - np.min(used[fin])), 3)
     return info
 
 
@@ -1239,7 +1453,11 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
         ncfg = ((config or {}).get("dashboard") or {}).get("ntfy") or {}
         if ncfg.get("topic"):
             from .notify import NtfyNotifier
-            ntfy = NtfyNotifier(store.db_path, **{k: v for k, v in ncfg.items() if k in NtfyNotifier.CONFIG_KEYS})
+            try:        # a bad push config must never keep the dashboard itself from starting
+                ntfy = NtfyNotifier(store.db_path, **{k: v for k, v in ncfg.items() if k in NtfyNotifier.CONFIG_KEYS})
+            except (TypeError, ValueError) as e:
+                log.warning("ntfy push disabled - bad dashboard.ntfy config: %s", e)
+                ntfy = None
     elif notifier is not None:
         ntfy = notifier
 
@@ -1354,7 +1572,10 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
         if res is None:
             raise HTTPException(404, "no archived frame for this board")
         f, fr, bbox = res
-        data = crop_jpeg(f, bbox, (fr["w"], fr["h"]), pad=pad, max_w=max_w)
+        try:
+            data = crop_jpeg(f, bbox, (fr["w"], fr["h"]), pad=pad, max_w=max_w)
+        except (TypeError, ValueError):       # malformed bbox in the observation: serve a downscaled full frame
+            data = crop_jpeg(f, None, (fr["w"], fr["h"]), max_w=max_w)
         if data is None:
             return FileResponse(f)
         return Response(data, media_type="image/jpeg", headers={"Cache-Control": "max-age=3600"})
@@ -1370,6 +1591,8 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
             t = parse_time_param(ts)
         except ValueError as e:
             _bad(e)
+        if t is None:
+            _bad("ts is required")
         r, f = store.nearest_frame(t, max_s)
         if r is None:
             raise HTTPException(404, f"no archived frame within ±{max_s:.0f} s")
@@ -1404,11 +1627,18 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
     def timeline(since: Optional[str] = None, until: Optional[str] = None, bucket_s: Optional[float] = Query(None, gt=0),
                  sun_lat: Optional[float] = Query(None, ge=-90, le=90), sun_lon: Optional[float] = Query(None, ge=-180, le=180),
                  max_markers: int = Query(1500, ge=10, le=20000), window: str = "24h"):
+        """``window`` = 6h / 3d / 90m ending at ``until`` (default: newest observation), or ``all`` =
+        everything from the oldest observation."""
         s, u = _times(since, until)
-        m = _REL.match(window or "")
-        if not m:
-            _bad("window must look like 6h / 3d / 90m")
-        win = float(m.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2).lower()]
+        if (window or "").strip().lower() == "all":
+            win = None
+        else:
+            m = _REL.match(window or "")
+            if not m:
+                _bad("window must look like 6h / 3d / 90m, or 'all'")
+            win = float(m.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2).lower()]
+            if win <= 0:
+                _bad("window must be positive")
         try:
             return store.timeline(s, u, bucket_s, sun_lat, sun_lon, max_markers, win)
         except ValueError as e:
@@ -1424,7 +1654,12 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
 
     @app.get("/api/layers")
     def layers():
-        return {"dir": str(store.layers_dir), "layers": store.layers()}
+        eng = store.engine_layers_dir()
+        same = store.layers_dir.resolve() == eng.resolve()
+        return {"dir": str(store.layers_dir), "engine_dir": str(eng), "engine_reads_this_dir": same,
+                "warning": None if same else (f"hordejakt.layers.live reads {eng}, not {store.layers_dir}: "
+                                              "these layers do not reach the posterior"),
+                "layers": store.layers()}
 
     @app.get("/api/calibration")
     def calibration():
@@ -1441,9 +1676,16 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
             value = v
         elif key == "camera_attitude":
             if not isinstance(value, dict) or not {"heading_deg", "pitch_deg", "roll_deg"} & set(value):
-                _bad("camera_attitude needs a dict with heading_deg / pitch_deg / roll_deg (+ *_sigma_deg)")
+                _bad("camera_attitude needs a dict with heading_deg / pitch_deg / roll_deg, each with its *_sigma_deg")
             clean = {}
+            valid_at = None
             for k, x in value.items():
+                if k == "valid_at":
+                    try:
+                        valid_at = parse_time_param(x) if x not in (None, "") else None
+                    except (TypeError, ValueError):
+                        _bad("valid_at must be an ISO time (when the level reference was measured)")
+                    continue
                 if k not in CAL_ATTITUDE:
                     _bad(f"unknown camera_attitude field {k}")
                 lo, hi = CAL_ATTITUDE[k]
@@ -1451,6 +1693,15 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
                 if not math.isfinite(v) or not lo <= v <= hi:
                     _bad(f"{k} must be in [{lo}, {hi}]")
                 clean[k] = v
+            for ax in CAL_ATTITUDE_AXES:
+                if (f"{ax}_deg" in clean) != (f"{ax}_sigma_deg" in clean):
+                    _bad(f"give {ax}_deg together with {ax}_sigma_deg: the astro solver uses an axis only with its "
+                         f"sigma (without it: its weak default or, for heading, nothing), and a sigma without a "
+                         f"value would pin {ax} to 0 deg")
+            if valid_at is not None:
+                if parse_iso(valid_at) > utcnow() + timedelta(minutes=5):
+                    _bad("valid_at lies in the future")
+                clean["valid_at"] = valid_at      # the solver ties the prior to the pose in force at this time
             clean["method"] = "manual (dashboard)"
             value = clean
         else:
@@ -1463,11 +1714,18 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
     async def stream(request: Request, since_obs: Optional[int] = None, since_event: Optional[int] = None,
                      kinds: Optional[str] = None, max_events: Optional[int] = Query(None, ge=1),
                      timeout: Optional[float] = Query(None, gt=0), poll_s: float = Query(1.0, ge=0.05, le=10.0),
-                     heartbeat_s: float = Query(15.0, ge=0.5, le=300.0), frame_every_s: float = Query(5.0, ge=0.0, le=600.0)):
-        """Server-Sent Events: ``hello``, ``observation``, ``event``, ``event_update``, ``frame``,
+                     heartbeat_s: float = Query(15.0, ge=0.5, le=300.0), frame_every_s: float = Query(5.0, ge=0.0, le=600.0),
+                     max_replay: int = Query(MAX_REPLAY_OBS, ge=0, le=1_000_000)):
+        """Server-Sent Events: ``hello``, ``gap``, ``observation``, ``event``, ``event_update``, ``frame``,
         ``calibration`` (+ ``: ping`` comments). Cursors: Last-Event-ID header ("o<obs>.e<event>") >
         since_obs/since_event > current maxima (only rows that arrive after connecting).
-        ``max_events`` / ``timeout`` end the stream (tests, scripts); a browser keeps it open."""
+        ``max_events`` / ``timeout`` end the stream (tests, scripts); a browser keeps it open.
+
+        Resume after a long disconnect (a laptop that slept overnight: EventSource reconnects with its
+        Last-Event-ID and would get every observation since, ~10^5 rows that freeze the page): at most
+        ``max_replay`` observations are replayed; older ones are skipped and announced by one ``gap``
+        message ({skipped_obs, from_id, to_id}) so the client reloads its tables. Events (alerts) are
+        always replayed in full. A cursor beyond the current maxima (a DB that was replaced) is reset."""
         kinds_ = [k.strip() for k in kinds.split(",") if k.strip()] if kinds else None
         mo, me = await run_in_threadpool(store.max_ids)
         cur_o = since_obs if since_obs is not None else mo
@@ -1475,6 +1733,14 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
         m = re.match(r"^o(\d+)\.e(\d+)$", request.headers.get("last-event-id", "").strip())
         if m:
             cur_o, cur_e = int(m.group(1)), int(m.group(2))
+        gap = None
+        if cur_o > mo or cur_e > me:          # DB replaced / ids reused: the old cursor would hide new rows
+            gap = {"skipped_obs": 0, "from_id": cur_o, "to_id": min(cur_o, mo), "reason": "cursor ahead of the database"}
+            cur_o, cur_e = min(cur_o, mo), min(cur_e, me)
+        if mo - cur_o > max_replay:
+            gap = {"skipped_obs": mo - max_replay - cur_o, "from_id": cur_o, "to_id": mo - max_replay,
+                   "reason": "resume backlog larger than max_replay"}
+            cur_o = mo - max_replay
 
         async def gen():
             nonlocal cur_o, cur_e
@@ -1487,7 +1753,9 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
                 last_beat = time.monotonic()
                 yield "retry: 3000\n\n"
                 yield _sse("hello", {"obs_cursor": cur_o, "event_cursor": cur_e, "server_time": iso(utcnow()),
-                                     "kinds": kinds_}, f"o{cur_o}.e{cur_e}")
+                                     "kinds": kinds_, "gap": gap}, f"o{cur_o}.e{cur_e}")
+                if gap is not None:
+                    yield _sse("gap", gap, f"o{cur_o}.e{cur_e}")
                 while True:
                     if await request.is_disconnected():
                         break
@@ -1512,10 +1780,7 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
                         cal_stamp = cal
                     elif cal != cal_stamp:
                         cal_stamp = cal
-                        yield _sse("calibration", {"latency_s": store.db.calibration("latency_s"),
-                                                   "latency_sigma_s": store.db.calibration("latency_sigma_s"),
-                                                   "audio_offset_s": store.db.calibration("audio_offset_s"),
-                                                   "updated": cal[0]})
+                        yield _sse("calibration", await run_in_threadpool(store.timing_calibration))
                     if fmax != last_frame and now - last_frame_sent >= frame_every_s:
                         first = last_frame is None
                         last_frame, last_frame_sent = fmax, now

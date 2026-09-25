@@ -104,6 +104,17 @@ DEFAULT_SITE = (61.25, 9.0)          # centre of the hordejakt search domain (la
 
 
 # ============================================================================ shared helpers
+def _round_float(f: float):
+    """4 decimals, but at least 4 significant digits for small magnitudes (noise sigmas, duv, rates);
+    never fewer decimals than 4, so unix times and pixel coordinates keep their precision."""
+    if not math.isfinite(f):
+        return None
+    a = abs(f)
+    if a == 0.0 or a >= 1e-2:
+        return round(f, 4)
+    return float(f"{f:.4g}")
+
+
 def clean(v):
     """Recursively convert numpy scalars / arrays / bools / datetimes into JSON-friendly values."""
     if isinstance(v, dict):
@@ -117,11 +128,48 @@ def clean(v):
     if isinstance(v, (int, np.integer)):
         return int(v)
     if isinstance(v, (float, np.floating)):
-        f = float(v)
-        return round(f, 4) if math.isfinite(f) else None
+        return _round_float(float(v))
     if isinstance(v, datetime):
         return iso(v)
     return v
+
+
+def as_rgb(img) -> np.ndarray:
+    """Coerce a frame image to contiguous H x W x 3 uint8 RGB.
+
+    The ingest contract is H x W x 3 uint8, but a grey IR frame decoded as 2-D / H x W x 1,
+    an RGBA PNG from an image-folder replay, or float / 16-bit arrays must not crash the
+    analyzers. Float images with max <= 1 are scaled by 255; 16-bit images are divided by 257.
+    """
+    a = np.asarray(img)
+    if a.ndim == 3 and a.shape[2] == 3 and a.dtype == np.uint8:
+        return a
+    if a.dtype != np.uint8:
+        if np.issubdtype(a.dtype, np.floating):
+            a = np.nan_to_num(a.astype(np.float32))
+            if a.size and float(a.max()) <= 1.0 + 1e-6:
+                a = a * 255.0
+        elif a.dtype in (np.uint16, np.int32, np.uint32, np.int64, np.uint64) and a.size and a.max() > 255:
+            a = a.astype(np.float32) / 257.0
+        a = np.clip(a, 0, 255).astype(np.uint8)
+    if a.ndim == 2:
+        a = a[..., None]
+    if a.ndim != 3:
+        raise ValueError(f"unsupported frame image shape {a.shape}")
+    if a.shape[2] == 1 or a.shape[2] == 2:
+        a = np.repeat(a[..., :1], 3, axis=2)
+    elif a.shape[2] > 3:
+        a = a[..., :3]
+    return np.ascontiguousarray(a)
+
+
+def rgb_frame(frame):
+    """The frame itself when its image already is H x W x 3 uint8, else a copy with a coerced image."""
+    img = frame.image
+    if isinstance(img, np.ndarray) and img.ndim == 3 and img.shape[2] == 3 and img.dtype == np.uint8:
+        return frame
+    import dataclasses
+    return dataclasses.replace(frame, image=as_rgb(img))
 
 
 def downscale(img: np.ndarray, width: int):
@@ -224,10 +272,11 @@ def frame_ir_mode(frame, ctx: Context, small: Optional[np.ndarray] = None) -> bo
     """IR mode for this frame: the sky analyzer's hysteresis decision when it already ran on this
     frame, else a raw decision from a thumbnail."""
     st = ctx.state.get("sky") or {}
-    if st.get("frame_index") == frame.index and "ir_mode" in st:
+    # index AND time: frame indices restart when the ingest reconnects or a replay chain starts over
+    if st.get("frame_index") == frame.index and st.get("ts") == frame.real_ts and "ir_mode" in st:
         return bool(st["ir_mode"])
     if small is None:
-        small, _ = downscale(frame.image, 160)
+        small, _ = downscale(as_rgb(frame.image), 160)
     return is_ir_raw(small)
 
 
@@ -369,7 +418,12 @@ class SkyMaskModel:
         return self.n >= self.min_frames
 
     def mask(self, current_score: Optional[np.ndarray] = None):
-        """(bool mask, state) - learned when confident, else the current frame's thresholded score."""
+        """(bool mask, state) - learned when confident, else the current frame's thresholded score.
+
+        Pass ``current_score=None`` when the frame is not usable for a bootstrap (IR mode or a dark
+        frame): the score is *relative* brightness, and in IR the illuminator makes the near
+        foreground (box roof, whiteboard) the brightest smooth thing in the frame. A mask from such
+        a frame would point every night-sky measurement at the box instead of the sky."""
         if self.confident:
             raw, state = self.acc > self.thr, "learned"
         elif current_score is not None:

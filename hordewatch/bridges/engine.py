@@ -88,8 +88,8 @@ def layers_fingerprint(d: Path) -> str:
     h = hashlib.sha1()
     if d.exists():
         for p in sorted(d.glob("*.npz")):
-            st = p.stat()
-            h.update(f"{p.name}:{st.st_size}:{int(st.st_mtime)}".encode())
+            st = p.stat()   # ns mtime: a same-size rewrite within one second must still count as a change
+            h.update(f"{p.name}:{st.st_size}:{st.st_mtime_ns}".encode())
     return h.hexdigest()
 
 
@@ -163,6 +163,10 @@ class EngineBridge(Analyzer):
         if rc is None:
             if time.time() - self._proc_t0 > float(self.get("timeout_s")):
                 self._proc.kill()
+                try:
+                    self._proc.wait(timeout=10)   # reap it (no zombie, log file complete)
+                except Exception:
+                    pass
                 rc = -9
             else:
                 return None

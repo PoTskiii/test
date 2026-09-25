@@ -2,7 +2,7 @@
 
 Two classic passive direction-finding problems are solved here, both used to
 localise the forest box's *uplink transmitter* (the Starlink router's WiFi, a
-4G/5G modem, a crew camp's phones/WiFi) from measurements a searcher collects
+4G/5G modem) from measurements a searcher collects
 while walking or driving the forest roads:
 
 1. **Bearing intersection** -- from several (lat, lon, bearing) fixes taken with

@@ -57,16 +57,27 @@ Merging and de-duplication
   (as soon as two reads agree or after ``emit_after_reads`` reads, else when
   the board goes down); a *revision* is emitted only if later reads change the
   text materially. If she flips the board / writes something new while still
-  holding it (text similarity drops), a new board instance starts. Texts are
-  compared with earlier boards stored in the DB: a board held up again is
-  recorded with ``is_new=False`` and ``repeat_of`` but is **not** re-announced;
-  only genuinely new text creates a ``db.add_event``.
+  holding it (text similarity drops), a new board instance starts - but only
+  after a *second* divergent read agrees with the first (``split_confirm_sim``):
+  a single odd read (a hand covering half the board, glare) is discarded, and
+  a partial read whose text is contained in the current text is not divergent
+  at all. An abandoned instance with a single read is dropped, not announced.
+  Texts are compared with earlier boards stored in the DB: a board held up
+  again is recorded with ``is_new=False`` and ``repeat_of`` but is **not**
+  re-announced; only genuinely new text creates a ``db.add_event``.
 
 Extras
   * Times written on the board ("KL 14:30", "14:30") produce ``clock_seen``
     with ``capture_minus_shown_s`` - an upper bound on stream latency.
   * Stable boards (fixtures, a board leaning on the wall for hours) are not
     re-OCR'd every frame: an appearance hash of the rectified crop gates OCR.
+    The hash is zero-mean / unit-variance normalised, so a cloud or exposure
+    change does not force a re-read while new writing does. At most
+    ``max_reads`` reads are kept per instance (best-scoring + most recent), so
+    merging stays cheap however long a board stays up.
+  * ``ctx.trigger('whiteboard')`` is a pulse: it is withdrawn after
+    ``trigger_ttl_s`` of stream time if no VLM analyzer consumed it (the runner
+    otherwise force-runs every analyzer on every frame while a trigger is set).
 
 Failure modes
   Overcast sky / sunlit tarpaulin can look like a board (rejected mostly by
@@ -96,6 +107,60 @@ from ..types import Observation, iso
 from .base import Analyzer, Context
 
 log = logging.getLogger("hordewatch.whiteboard")
+
+
+def as_rgb_u8(img) -> np.ndarray:
+    """Coerce any decoded frame to H x W x 3 uint8 (grey IR frames, RGBA, float images)."""
+    a = np.asarray(img)
+    if a.dtype == np.uint16:
+        a = (a >> 8).astype(np.uint8)                   # 16-bit PNG / raw IR
+    elif a.dtype == np.bool_:
+        a = a.astype(np.uint8) * 255
+    elif a.dtype != np.uint8:
+        was_float = a.dtype.kind == "f"
+        a = np.nan_to_num(a.astype(np.float64))
+        a = np.clip(a * 255.0 if was_float and a.size and float(a.max()) <= 1.0 else a, 0, 255)
+        a = a.astype(np.uint8)
+    if a.ndim == 2:
+        a = np.repeat(a[..., None], 3, axis=2)
+    elif a.ndim == 3 and a.shape[2] == 1:
+        a = np.repeat(a, 3, axis=2)
+    elif a.ndim == 3 and a.shape[2] > 3:
+        a = a[..., :3]
+    return np.ascontiguousarray(a)
+
+
+def pulse_trigger(ctx, name: str, now: datetime, ttl_s: float, index: Optional[int] = None):
+    """ctx.trigger(name) with a lifetime. The runner force-runs *every* frame analyzer while any
+    trigger is set, so a trigger nobody consumes must be withdrawn. Deadlines live in
+    ctx.state['trigger_deadlines'] {name: (set_ts, ttl_s, set_frame_index)} (shared by the vision
+    analyzers)."""
+    ctx.trigger(name)
+    ctx.state.setdefault("trigger_deadlines", {})[name] = (now, float(ttl_s), index)
+
+
+def expire_pulses(ctx, now: datetime, index: Optional[int] = None):
+    """Withdraw pulse triggers whose ttl (stream time) has passed. Time running backwards (replay
+    restarted) also expires them, and so does a frame count above max(2, ttl_s) (frames >= 1 s apart)
+    in case a source repeats timestamps."""
+    dl = ctx.state.get("trigger_deadlines")
+    if not isinstance(dl, dict):
+        return
+    for name, entry in list(dl.items()):
+        if name not in ctx.triggers:
+            dl.pop(name, None)
+            continue
+        try:
+            t0, ttl = entry[0], float(entry[1])
+            i0 = entry[2] if len(entry) > 2 else None
+            age = (now - t0).total_seconds()
+        except (TypeError, ValueError, IndexError):
+            dl.pop(name, None)
+            continue
+        by_count = index is not None and i0 is not None and not 0 <= index - i0 <= max(2, int(ttl))
+        if age < 0 or age > ttl or by_count:
+            ctx.triggers.discard(name)
+            dl.pop(name, None)
 
 # --------------------------------------------------------------------------------------------
 # Norwegian lexicon (words with Æ Ø Å likely on a clue board: compass, terrain, nature,
@@ -318,6 +383,15 @@ def board_similarity(a: str, b: str) -> float:
     return float(ratio)
 
 
+def text_contained(a: str, b: str, min_len: int = 4) -> bool:
+    """True if one text is (after folding) a substring of the other - a partial read of the same
+    board (hand over half of it, glare on one line)."""
+    ka, kb = text_key(a), text_key(b)
+    if min(len(ka), len(kb)) < min_len:
+        return False
+    return ka in kb or kb in ka
+
+
 # --------------------------------------------------------------------------------------------
 # OCR engines
 # --------------------------------------------------------------------------------------------
@@ -379,6 +453,7 @@ class BoardRead:
     variant: str
     ts: Optional[datetime] = None
     frame_id: Optional[int] = None
+    capture_ts: Optional[datetime] = None
 
     @property
     def text(self) -> str:
@@ -503,9 +578,36 @@ def _fit_quad(cnt: np.ndarray):
     return cv2.boxPoints(cv2.minAreaRect(cnt)).astype(np.float32)
 
 
+def white_patch_gains(small: np.ndarray, V: np.ndarray, max_gain: float = 2.6) -> Optional[np.ndarray]:
+    """Per-channel von Kries gains that make the brightest ~1 % of pixels neutral, or None.
+
+    A white board reflects the illuminant: in low evening sun (~2500-3500 K, common at 60 deg N in
+    autumn) it is orange with HSV saturation 90-130 and fails a fixed low-saturation test. The
+    brightest pixels in the frame are usually the board itself or other sunlit surfaces, so their
+    mean colour estimates the illuminant. None when they are already neutral or implausibly coloured
+    (a gain above ``max_gain``: a coloured light or a saturated yellow canopy, not an illuminant)."""
+    thr = float(np.percentile(V, 99.0))
+    m = V >= thr
+    if int(m.sum()) < 20:
+        return None
+    rgb = small[m].astype(np.float32).mean(axis=0) + 1.0
+    g = float(rgb.max()) / rgb
+    if float(g.max()) > max_gain or float(g.max()) < 1.12:
+        return None
+    return g.astype(np.float32)
+
+
 def detect_boards(rgb: np.ndarray, work_w: int = 640, min_area_frac: float = 0.003, max_area_frac: float = 0.45,
-                  s_max: int = 75, min_score: float = 0.55, ir_mode: Optional[bool] = None) -> list:
-    """Return whiteboard candidates sorted by score (best first)."""
+                  s_max: int = 75, min_score: float = 0.55, ir_mode: Optional[bool] = None,
+                  white_balance: bool = True) -> list:
+    """Return whiteboard candidates sorted by score (best first).
+
+    The low-saturation test is run on the raw colours and - when the brightest pixels are tinted
+    (warm evening sun, cold shade) - again after a white-patch balance (:func:`white_patch_gains`);
+    candidates from both passes go through the same shape/contrast scoring and NMS. Because the
+    balance also neutralises a sunlit yellow patch that happens to be the brightest thing, a
+    candidate found only after balancing must be clearly rectangular (>= 0.85) and carry ink."""
+    rgb = as_rgb_u8(rgb)
     H, W = rgb.shape[:2]
     s = min(1.0, work_w / float(W))
     small = cv2.resize(rgb, (int(round(W * s)), int(round(H * s))), interpolation=cv2.INTER_AREA) if s < 1 else rgb
@@ -523,28 +625,41 @@ def detect_boards(rgb: np.ndarray, work_w: int = 640, min_area_frac: float = 0.0
     max_area = max_area_frac * h * w
     k = max(3, int(round(w / 160.0)) | 1)
     close_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-    lowsat = np.ones_like(V, bool) if ir_mode else (S <= s_max)
+    sat_variants = [("raw", S)]
+    if not ir_mode and white_balance:
+        g = white_patch_gains(small, V)
+        if g is not None:
+            bal = np.clip(small.astype(np.float32) * g, 0, 255).astype(np.uint8)
+            sat_variants.append(("white_patch", cv2.cvtColor(bal, cv2.COLOR_RGB2HSV)[..., 1]))
     cands = []
-    for frac in (0.35, 0.55, 0.75):
-        thr = max(90.0, med + frac * (top - med))
-        mask = ((Vb >= thr) & lowsat).astype(np.uint8) * 255
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_k)
-        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in cnts:
-            area = cv2.contourArea(cnt)
-            if area < min_area or area > max_area:
-                continue
-            c = _score_candidate(cnt, area, small, V, S, ir_mode, h, w)
-            if c is None or c["score"] < min_score:
-                continue
-            corners = c["quad"] / s
-            xs, ys = corners[:, 0], corners[:, 1]
-            bbox = (int(max(0, xs.min())), int(max(0, ys.min())), int(min(W - 1, xs.max())), int(min(H - 1, ys.max())))
-            cands.append(BoardCandidate(corners=order_corners(corners), bbox=bbox, score=c["score"],
-                                        area_frac=area / (h * w), aspect=c["aspect"],
-                                        rectangularity=c["rect"], contrast=c["contrast"], ink_frac=c["ink"],
-                                        angle_deg=c["angle"], touches_border=c["border"], ir_mode=ir_mode,
-                                        features={"solidity": c["solidity"], "thr_frac": frac}))
+    for wb_name, Sv in sat_variants:
+        lowsat = np.ones_like(V, bool) if ir_mode else (Sv <= s_max)
+        for frac in (0.35, 0.55, 0.75):
+            thr = max(90.0, med + frac * (top - med))
+            mask = ((Vb >= thr) & lowsat).astype(np.uint8) * 255
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_k)
+            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in cnts:
+                area = cv2.contourArea(cnt)
+                if area < min_area or area > max_area:
+                    continue
+                c = _score_candidate(cnt, area, small, V, Sv, ir_mode, h, w)
+                if c is None or c["score"] < min_score:
+                    continue
+                if wb_name != "raw" and (c["rect"] < 0.85 or not 0.004 <= c["ink"] <= 0.35):
+                    # the balance also neutralises sunlit yellow grass/leaves: a tinted candidate must be a
+                    # real rectangle (an ellipse is pi/4 = 0.785) with writing on it
+                    continue
+                corners = c["quad"] / s
+                xs, ys = corners[:, 0], corners[:, 1]
+                bbox = (int(max(0, xs.min())), int(max(0, ys.min())), int(min(W - 1, xs.max())),
+                        int(min(H - 1, ys.max())))
+                cands.append(BoardCandidate(corners=order_corners(corners), bbox=bbox, score=c["score"],
+                                            area_frac=area / (h * w), aspect=c["aspect"],
+                                            rectangularity=c["rect"], contrast=c["contrast"], ink_frac=c["ink"],
+                                            angle_deg=c["angle"], touches_border=c["border"], ir_mode=ir_mode,
+                                            features={"solidity": c["solidity"], "thr_frac": frac,
+                                                      "white_balance": wb_name}))
     # non-maximum suppression across the threshold stack
     cands.sort(key=lambda c: -c.score)
     keep = []
@@ -709,7 +824,8 @@ def merge_reads(reads: list) -> dict:
         vs = c["variants"]
 
         def vscore(v):
-            agree = np.mean([board_similarity(v.text, o.text) for o in vs if o is not v]) if len(vs) > 1 else 0.0
+            others = [board_similarity(v.text, o.text) for o in vs if o is not v]
+            agree = float(np.mean(others)) if others else 0.0
             return v.conf * (1.0 + agree) * (1.0 + 0.02 * len(text_key(v.text)))
         best = max(vs, key=vscore)
         support = len(c["reads"])
@@ -741,12 +857,26 @@ def find_clock(text: str):
     return out
 
 
-def _oslo_tz():
+def _eu_summer_time(at_utc: datetime) -> bool:
+    """EU rule (Norway): CEST from the last Sunday of March 01:00 UTC to the last Sunday of October 01:00 UTC."""
+    y = at_utc.year
+
+    def last_sunday(month):
+        d = datetime(y, month, 31, 1, 0, tzinfo=timezone.utc)
+        return d - timedelta(days=(d.weekday() + 1) % 7)
+
+    return last_sunday(3) <= at_utc.astimezone(timezone.utc) < last_sunday(10)
+
+
+def _oslo_tz(at_utc: Optional[datetime] = None):
+    """Europe/Oslo. Without a tz database (Windows without the ``tzdata`` package) fall back to the EU
+    DST rule for the given instant - a fixed +2 h would be an hour off after the last Sunday of October."""
     try:
         from zoneinfo import ZoneInfo
         return ZoneInfo("Europe/Oslo")
-    except Exception:  # pragma: no cover
-        return timezone(timedelta(hours=2))
+    except Exception:
+        at = at_utc or datetime.now(timezone.utc)
+        return timezone(timedelta(hours=2 if _eu_summer_time(at) else 1))
 
 
 # --------------------------------------------------------------------------------------------
@@ -783,6 +913,7 @@ class _Track:
     archived: int = 0
     inst: _Instance = field(default_factory=_Instance)
     visible_obs: Optional[Observation] = None
+    pending: Optional[BoardRead] = None      # divergent read waiting for a second, agreeing one
 
 
 class WhiteboardAnalyzer(Analyzer):
@@ -795,9 +926,9 @@ class WhiteboardAnalyzer(Analyzer):
     DEFAULTS = {
         "work_w": 640, "min_area_frac": 0.003, "max_area_frac": 0.45, "s_max": 75, "min_score": 0.55,
         "persist_frames": 2, "max_gap_frames": 1, "emit_after_reads": 3, "agree_sim": 0.8,
-        "dedup_sim": 0.8, "new_instance_sim": 0.45, "ocr": True, "ocr_threads": 2,
-        "ocr_stable_every_s": 60.0, "thumb_change": 12.0, "rectify_long": 900, "archive_max_per_track": 12,
-        "min_text_chars": 2,
+        "dedup_sim": 0.8, "new_instance_sim": 0.45, "split_confirm_sim": 0.6, "ocr": True, "ocr_threads": 2,
+        "ocr_stable_every_s": 60.0, "thumb_change": 5.0, "rectify_long": 900, "archive_max_per_track": 12,
+        "min_text_chars": 2, "max_reads": 16, "trigger_ttl_s": 12.0, "max_known": 5000,
     }
 
     def __init__(self, config=None):
@@ -806,7 +937,7 @@ class WhiteboardAnalyzer(Analyzer):
         self._track: Optional[_Track] = None
         self._next_id = 1
         self._known = None           # earlier boards: dicts {text, id (DB row) or obs (emitted this run)}
-        self._trigger_pending_since = None
+        self._known_keys = set()
 
     # ---------------------------------------------------------------- helpers
     def available(self) -> bool:
@@ -826,9 +957,22 @@ class WhiteboardAnalyzer(Analyzer):
             for o in db.observations(kind="whiteboard_text"):
                 v = o["value"] or {}
                 if o.get("analyzer") == self.name and v.get("text"):
-                    self._known.append({"text": v["text"], "id": o["id"], "obs": None})
+                    self._remember({"text": v["text"], "id": o["id"], "obs": None})
         except Exception as e:  # pragma: no cover
             log.warning("whiteboard: could not load earlier boards: %s", e)
+
+    def _remember(self, entry):
+        """Add a board text to the de-duplication memory. Identical texts (after OCR folding) are
+        stored once - the first (original) occurrence is what repeats point to - so the memory grows
+        with the number of *distinct* boards, not with how often each is held up."""
+        key = text_key(entry["text"])
+        if not key or key in self._known_keys:
+            return
+        self._known_keys.add(key)
+        self._known.append(entry)
+        if len(self._known) > int(self.p["max_known"]):
+            drop = self._known.pop(0)
+            self._known_keys.discard(text_key(drop["text"]))
 
     @staticmethod
     def _kid(k):
@@ -846,19 +990,9 @@ class WhiteboardAnalyzer(Analyzer):
                 best, bsim = k, sim
         return best, bsim
 
-    def _expire_trigger(self, ctx, frame):
-        # ctx.trigger is a pulse: if nobody consumed it (VLM not loaded) drop it after 2 frames,
-        # otherwise the runner keeps force-calling every analyzer on every frame.
-        if self._trigger_pending_since is not None:
-            if "whiteboard" not in ctx.triggers:
-                self._trigger_pending_since = None
-            elif frame.index - self._trigger_pending_since >= 2:
-                ctx.triggers.discard("whiteboard")
-                self._trigger_pending_since = None
-
     def _fire_trigger(self, ctx, frame):
-        ctx.trigger("whiteboard")
-        self._trigger_pending_since = frame.index
+        # a pulse: withdrawn after trigger_ttl_s of stream time if no VLM consumed it (see expire_pulses)
+        pulse_trigger(ctx, "whiteboard", frame.real_ts, self.p["trigger_ttl_s"], frame.index)
 
     @staticmethod
     def _associate(tr: _Track, c: BoardCandidate) -> bool:
@@ -873,18 +1007,25 @@ class WhiteboardAnalyzer(Analyzer):
 
     # ---------------------------------------------------------------- main
     def on_frame(self, frame, ctx: Context):
-        self._expire_trigger(ctx, frame)
+        expire_pulses(ctx, frame.real_ts, frame.index)
         self._load_known(ctx)
         out = []
+        image = as_rgb_u8(frame.image)
         try:
-            cands = detect_boards(frame.image, work_w=self.p["work_w"], min_area_frac=self.p["min_area_frac"],
+            cands = detect_boards(image, work_w=self.p["work_w"], min_area_frac=self.p["min_area_frac"],
                                   max_area_frac=self.p["max_area_frac"], s_max=self.p["s_max"],
                                   min_score=self.p["min_score"])
         except Exception as e:  # never kill the runner
             log.warning("whiteboard detection failed: %s", e)
             cands = []
-        best = cands[0] if cands else None
         tr = self._track
+        # keep following the tracked board even if a transient bright thing (glare on the wall,
+        # a sunlit patch) out-scores it in this frame: prefer the best candidate that associates
+        best = None
+        if tr is not None:
+            best = next((c for c in cands if self._associate(tr, c)), None)
+        if best is None:
+            best = cands[0] if cands else None
         if best is not None and tr is not None and self._associate(tr, best):
             tr.n += 1
             tr.misses = 0
@@ -906,7 +1047,7 @@ class WhiteboardAnalyzer(Analyzer):
                 ctx.state.pop("whiteboard", None)
             return out
 
-        crop = rectify(frame.image, tr.corners, target_long=self.p["rectify_long"])
+        crop = rectify(image, tr.corners, target_long=self.p["rectify_long"])
         if not tr.confirmed and tr.n >= self.p["persist_frames"]:
             tr.confirmed = True
             v = {"bbox": list(tr.bbox), "corners": np.round(tr.corners, 1).tolist(), "score": round(best.score, 3),
@@ -921,7 +1062,7 @@ class WhiteboardAnalyzer(Analyzer):
             log.info("whiteboard visible (track %d) bbox=%s score=%.2f", tr.id, tr.bbox, best.score)
         ctx.state["whiteboard"] = {"bbox": list(tr.bbox), "corners": tr.corners.tolist(), "crop": crop,
                                    "track_id": tr.id, "frame_id": frame.id, "frame_index": frame.index,
-                                   "ts": frame.real_ts, "confirmed": tr.confirmed}
+                                   "ts": frame.real_ts, "capture_ts": frame.capture_ts, "confirmed": tr.confirmed}
         if tr.confirmed and tr.archived < self.p["archive_max_per_track"]:
             ctx.state["archive_next"] = True
             tr.archived += 1
@@ -931,27 +1072,62 @@ class WhiteboardAnalyzer(Analyzer):
             if tr.inst.first_ts is None:
                 tr.inst.first_ts, tr.inst.first_capture, tr.inst.frame_id = frame.real_ts, frame.capture_ts, frame.id
             cur = merge_reads(tr.inst.reads)["text"] if tr.inst.reads else ""
-            if (cur and len(text_key(read.text)) >= 4 and len(text_key(cur)) >= 4
-                    and board_similarity(read.text, cur) < self.p["new_instance_sim"] and tr.confirmed):
-                # she flipped the board / wrote something new while holding it up
-                out += self._finalize(tr, ctx, frame, final=True)
-                tr.inst = _Instance(first_ts=frame.real_ts, first_capture=frame.capture_ts, frame_id=frame.id)
-                self._fire_trigger(ctx, frame)
-            tr.inst.reads.append(read)
+            if cur and tr.confirmed and self._diverges(read.text, cur):
+                pend = tr.pending
+                if pend is not None and board_similarity(read.text, pend.text) >= self.p["split_confirm_sim"]:
+                    # two agreeing reads of different text: she flipped the board / wrote something new
+                    old = tr.inst
+                    if len(old.reads) >= 2 or old.emitted is not None:
+                        out += self._finalize(tr, ctx, frame, final=True)
+                    else:
+                        log.info("whiteboard: dropping single-read instance %r (track %d)", old.reads[0].text
+                                 if old.reads else "", tr.id)
+                    tr.inst = _Instance(first_ts=pend.ts, first_capture=pend.capture_ts, frame_id=pend.frame_id,
+                                        reads=[pend, read])
+                    tr.pending = None
+                    self._fire_trigger(ctx, frame)
+                else:
+                    tr.pending = read            # a single odd read (occlusion, glare): wait for confirmation
+            else:
+                tr.pending = None
+                tr.inst.reads.append(read)
+                self._cap_reads(tr.inst)
         if tr.confirmed:
             out += self._finalize(tr, ctx, frame, final=False)
         return out
+
+    def _diverges(self, text: str, cur: str) -> bool:
+        if len(text_key(text)) < 4 or len(text_key(cur)) < 4:
+            return False
+        if text_contained(text, cur):
+            return False                          # partial read of the same board
+        return board_similarity(text, cur) < self.p["new_instance_sim"]
+
+    def _cap_reads(self, inst: _Instance):
+        """Bound per-instance reads (merge_reads is quadratic): keep the 4 most recent and the
+        best-scoring others, in chronological order."""
+        n = int(self.p["max_reads"])
+        if len(inst.reads) <= n:
+            return
+        recent = inst.reads[-4:]
+        older = inst.reads[:-4]
+        keep = set(id(r) for r in sorted(older, key=lambda r: -r.score)[:max(0, n - 4)])
+        inst.reads = [r for r in older if id(r) in keep] + recent
 
     def _maybe_read(self, tr: _Track, crop, frame) -> Optional[BoardRead]:
         if not self.p.get("ocr", True):
             return None
         thumb = cv2.resize(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY), (48, 32), interpolation=cv2.INTER_AREA).astype(np.float32)
+        # zero-mean / unit-variance (x32): cancels cloud/exposure gain and offset, keeps the writing.
+        # Measured on synthetic boards: same board re-detected ~1.3, 40 % darker ~0.7, new text ~10.
+        thumb = (thumb - thumb.mean()) / (thumb.std() + 2.0) * 32.0
         changed = tr.thumb is None or float(np.mean(np.abs(thumb - tr.thumb))) > self.p["thumb_change"]
         stale = tr.last_ocr_ts is None or (frame.real_ts - tr.last_ocr_ts).total_seconds() >= self.p["ocr_stable_every_s"]
         # read every frame until the instance is emitted; afterwards (or for a blank/illegible white object
         # that keeps yielding nothing) only when it looks different or once per ocr_stable_every_s
         settled = tr.inst.emitted is not None or (tr.inst.n_empty >= 2 and not tr.inst.reads)
-        if settled and not changed and not stale:
+        # a divergent read waiting for confirmation (board flipped?) needs the next frame read at once
+        if settled and not changed and not stale and tr.pending is None:
             return None
         rapid = get_rapidocr(self.p["ocr_threads"])
         tess = get_tesseract()
@@ -962,7 +1138,7 @@ class WhiteboardAnalyzer(Analyzer):
         if r is None or len(text_key(r.text)) < self.p["min_text_chars"]:
             tr.inst.n_empty += 1
             return None
-        r.ts, r.frame_id = frame.real_ts, frame.id
+        r.ts, r.frame_id, r.capture_ts = frame.real_ts, frame.id, frame.capture_ts
         return r
 
     def _ready(self, inst: _Instance) -> bool:
@@ -1017,7 +1193,7 @@ class WhiteboardAnalyzer(Analyzer):
             self._announce(ctx, ts, text, value, conf)
         inst.emitted, inst.emitted_text, inst.emitted_conf, inst.is_new = obs, text, m["conf"], is_new
         inst.all_emitted.append(obs)
-        self._known.append({"text": text, "id": None, "obs": obs})
+        self._remember({"text": text, "id": None, "obs": obs})
         out += [o for o in self._clock_obs(text, ts, inst.first_capture, inst.frame_id)
                 if o.value["shown_time"] not in inst.clocks]
         inst.clocks.update(o.value["shown_time"] for o in out if o.kind == "clock_seen")
@@ -1039,7 +1215,7 @@ class WhiteboardAnalyzer(Analyzer):
         out = []
         for hhmm in find_clock(text):
             hh, mm = map(int, hhmm.split(":"))
-            tz = _oslo_tz()
+            tz = _oslo_tz(capture or ts)
             ref = (capture or ts).astimezone(tz)
             shown = ref.replace(hour=hh, minute=mm, second=0, microsecond=0)
             diff = (ref - shown).total_seconds()
