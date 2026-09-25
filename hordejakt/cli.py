@@ -65,6 +65,7 @@ def main():
     cfg = dict(DEFAULT_CFG)
     if a.config:
         cfg.update(json.load(open(a.config)))
+    cfg["skip"] = a.skip
     run(cfg, top=a.top, skip=a.skip)
 
 

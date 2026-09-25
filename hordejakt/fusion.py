@@ -57,10 +57,15 @@ def fuse(layers, weights=None):
     for g, ls in groups.items():
         w = np.array([max(L.reliability, 1e-3) for L in ls])
         stack = np.stack([L.robust(domain) * weights.get(L.name, 1.0) for L in ls])
+        # coverage-aware mean: a layer with no information (NaN) at a cell gets
+        # zero weight there instead of voting "neutral" and diluting the others
+        cover = np.stack([~np.isnan(np.asarray(L.loglik, float)) for L in ls]).astype(float)
+        wc = w[:, None, None] * cover
         # hard exclusions survive the averaging
         hard = np.isneginf(stack).any(axis=0)
         s = np.where(np.isneginf(stack), 0.0, stack)
-        g_ll = np.tensordot(w / w.sum(), s, axes=1)
+        denom = wc.sum(axis=0)
+        g_ll = np.where(denom > 0, (wc * s).sum(axis=0) / np.where(denom > 0, denom, 1.0), 0.0)
         g_ll = np.where(hard, -np.inf, g_ll)
         contrib[g] = g_ll
         total = g_ll if total is None else total + g_ll

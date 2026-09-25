@@ -16,7 +16,7 @@ import numpy as np
 from . import OUTPUT
 from .fusion import apply_overrides, build_layers, credible_area_km2, fuse, hotspots, posterior
 from .grid import GRID
-from .layers import travel
+from .layers import travel, weather
 
 BASE = {"p_monday_pickup": 0.5, "defaultno_variant": "utenfly"}
 
@@ -50,6 +50,9 @@ def run(top=40, write=True):
             if key not in travel_cache:
                 travel_cache[key] = travel.build(GRID, cfg)
             layers = [L for L in layers if L.independence_group != "travel"] + travel_cache[key]
+        if "defaultno_fusion_utenfly" in delta.get("skip_layers", ()):
+            # without default.no's fusion, its rain grid no longer double counts -> use it
+            layers = layers + [weather.dn_rain_since_2109(GRID)]
         layers = apply_overrides(layers, delta)
         lp, _ = fuse(layers)
         p = posterior(lp)

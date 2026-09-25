@@ -141,18 +141,30 @@ class Raster:
         _, y = self.xy(np.arange(h), np.zeros(h))
         return x, y
 
+    def _prepared(self):
+        """float64 copy with NaN filled + NaN mask, cached until .data is replaced."""
+        key = (id(self.data), self.data.shape)
+        if getattr(self, "_prep_key", None) != key:
+            data = np.asarray(self.data, float)
+            nan = np.isnan(data)
+            if nan.any():
+                data = np.where(nan, np.nanmean(data) if (~nan).any() else 0.0, data)
+                nanf = nan.astype(np.float32)
+            else:
+                nanf = None
+            self._prep, self._prep_key = (data, nanf), key
+        return self._prep
+
     def sample(self, x, y, order=1, fill=np.nan):
+        """Interpolated values at coordinates (bilinear by default); `fill` outside / on nodata."""
         r, c = self.rowcol(x, y)
         r, c = np.atleast_1d(r), np.atleast_1d(c)
-        data = np.asarray(self.data, float)
-        nan = np.isnan(data)
-        if nan.any():
-            data = np.where(nan, np.nanmean(data) if (~nan).any() else 0.0, data)
+        data, nanf = self._prepared()
         out = map_coordinates(data, [r.ravel(), c.ravel()], order=order, mode="nearest").reshape(r.shape)
         h, w = self.shape
         outside = (r < -0.5) | (r > h - 0.5) | (c < -0.5) | (c > w - 0.5)
-        if nan.any():
-            nn = map_coordinates(nan.astype(float), [r.ravel(), c.ravel()], order=0, mode="nearest").reshape(r.shape)
+        if nanf is not None:
+            nn = map_coordinates(nanf, [r.ravel(), c.ravel()], order=0, mode="nearest").reshape(r.shape)
             outside |= nn > 0.5
         return np.where(outside, fill, out)
 

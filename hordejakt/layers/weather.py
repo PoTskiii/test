@@ -22,8 +22,8 @@ Always included (community polygons + our own computations on raw data):
 2. ``weather_sun_2309_clear_areas`` -> ``sky_2309``, r = 0.40
    Anja had sun 23.09 (forenoon; tavla 17:49 «SOL») while the satellite showed
    cloud over most of Norway. Two community products of the *same* satellite
-   observation are merged into one surface (mean of the two log P where both
-   have information, otherwise whichever has it - see "Why merged" below):
+   observation are merged into one surface (coverage-weighted mean of the two
+   log P; where only one has information it alone counts - "Why merged"):
    a) SOL_I_DAG (innhold.ts): clear areas drawn from a *description* of the
       image. ring 0 Kongsvinger-Rena-Sweden P = 1; ring 1 (parts of Vestfold,
       unclear which) P = 0.5; ring 2 (Trondheim-Ålesund, uncertain) P = 0.5;
@@ -51,22 +51,22 @@ Always included (community polygons + our own computations on raw data):
    0.2° x 0.4° grid (~22 km), land cells only (MagnusPladsen vind.ts).
    Speed is interpolated (Gaussian kernel, sigma 10 km; NaN > 25 km from any
    cell centre) and mapped with P = 0.15 + 0.85 / (1 + exp((v - 4) / 0.8)):
-   v = 2 -> 0.93, 3 -> 0.79, 4 -> 0.58, 5 -> 0.33, >= 7 -> ~0.15. In-forest
+   v = 2 -> 0.93, 3 -> 0.81, 4 -> 0.58, 5 -> 0.34, 6 -> 0.21, >= 7 -> ~0.17. In-forest
    wind is weaker than the 10 m model wind, hence the soft 2-4 m/s shoulder.
 
 5. ``weather_overcast_2409`` -> ``overcast_2409``, r = 0.40
    Tavla 24.09 «GRÅVÆR HELE DAGEN» (posted by 18:36). Up to three components,
-   merged per cell as the mean of the available log P:
+   merged per cell with the coverage-weighted mean of log P (see below):
    a) met.json (MET "now", 24.09 18:07, fetched by default.no; raw values).
       Decode: ``punkter = [[lat, lon, temp_C, cloud_pct, rain, rh_pct], ...]``
       (order from defaultno.ts dn_met). Cloud % interpolated (kernel sigma
       10 km, NaN > 25 km from a point) and mapped
       P = 0.4 + 0.6 * sigmoid((cloud - 45) / 12): 5 % -> 0.42, 45 % -> 0.70,
-      80 % -> 0.96.
+      80 % -> 0.97.
    b) vaer.json station field ``stigning`` = temperature rise dawn -> 11:00
       on 24.09 (Frost/MET). An overcast morning warms little:
       P = 0.3 + 0.7 * sigmoid((2.5 - rise) / 0.6): 0 °C -> 0.99,
-      2.5 -> 0.65, 3.5 -> 0.43, 5 -> 0.31. Kernel sigma 20 km, NaN > 50 km.
+      2.5 -> 0.65, 3.5 -> 0.41, 5 -> 0.31. Kernel sigma 20 km, NaN > 50 km.
    c) radar.png (MET radar composite 24.09 16:35Z = 18:35 local, via
       default.no; ``cfg['weather_use_radar']``, default True). Decode: 720 x 720
       RGBA over bounds ``b = [[58, 7], [63, 13]]`` (radar.json), treated as
@@ -85,7 +85,7 @@ Always included (community polygons + our own computations on raw data):
    «(kl. 11:05) Anja sa at det regnet» 24.09 - relayed by others, stills show
    dewy glass rather than certain rain; community: it rained in Rena then.
    Data: vaer.json ``regn`` = station precipitation 07-12 on 24.09 (mm).
-   P = 0.4 + 0.6 * (1 - exp(-r / 0.3)): 0 mm -> 0.4, 0.2 mm -> 0.71,
+   P = 0.4 + 0.6 * (1 - exp(-r / 0.3)): 0 mm -> 0.4, 0.2 mm -> 0.69,
    0.5 mm -> 0.89. Kernel sigma 20 km, NaN > 50 km from a station. (Rena's two
    stations had 0.2 mm, so the community Rena claim adds nothing separate.)
 
@@ -127,7 +127,12 @@ Why merged layers: fusion averages robust log-likelihoods inside a group and
 a NaN cell counts as a neutral vote there, so two separate layers with
 different coverage would halve the evidence wherever only one of them has
 information. Components of one observation are therefore merged per cell with
-a NaN-aware mean before they become a LayerResult.
+a coverage-weighted mean, sum_k w_k log P_k / sum_k w_k, before they become a
+LayerResult. w_k = 1 well inside component k's coverage and tapers smoothly
+to 0 at its edge (kernel fields: kernel weight sum relative to 1 sigma from a
+point; image/cell products: 2*blur(mask) - 1 clipped to [0, 1], blur sigma
+15 km for the radar, 8 km for utelukket), so no seams appear where one
+product's coverage ends.
 
 Not encoded (no matching data offline, or not weather):
 * «CA 12 °C (DAGEN) · NÅ CA 8-11 °C» (21.09 19:35), «ISH 16°» (23.09
@@ -139,8 +144,8 @@ Not encoded (no matching data offline, or not weather):
   depression at dawn) is for 24.09, when default.no's camera read "no dew".
 * vaer.json ``score`` (default.no similarity to the camera): same raw fields
   as components 5b/6, and it ranks northern Norway best - not used.
-* vegkamera.json (road weather 24.09 18:30): 6 of 313 gauges wet, all
-  Østfold/Romerike/west coast - corroborates the radar, no own layer.
+* vegkamera.json (road weather 24.09 18:30): 6 of 313 gauges wet (Østfold,
+  Follo, Nes/Romerike, west coast) - corroborates the radar, no own layer.
 * baer.json (berries), sjelden.json (aircraft rarity): not weather.
 """
 import json
@@ -269,14 +274,18 @@ def _soften(grid, mask, sigma_km):
 
 def _kernel_field(grid, lat, lon, val, sigma_km, cutoff_km, step=(0.05, 0.1)):
     """Gaussian-kernel (Nadaraya-Watson) interpolation of point values onto the
-    grid, computed on a coarse step grid and upsampled bilinearly. NaN where the
-    nearest point is farther than about cutoff_km."""
+    grid, computed on a coarse step grid and upsampled bilinearly.
+
+    Returns (field, coverage): field is NaN where the nearest point is farther
+    than about cutoff_km; coverage in [0, 1] is the kernel weight sum relative
+    to that at 1 sigma from a single point (1 near data, tapering to ~0 at the
+    cutoff) and is used to blend components without seams."""
     lat, lon, val = (np.asarray(a, float) for a in (lat, lon, val))
     ok = np.isfinite(lat) & np.isfinite(lon) & np.isfinite(val)
     ok &= (lat > grid.lat_min - 1) & (lat < grid.lat_max + 1) & (lon > grid.lon_min - 2) & (lon < grid.lon_max + 2)
     lat, lon, val = lat[ok], lon[ok], val[ok]
     if not len(val):
-        return grid.empty()
+        return grid.empty(), np.zeros(grid.shape)
     clat = np.arange(grid.lat_min, grid.lat_max + step[0] + 1e-9, step[0])
     clon = np.arange(grid.lon_min, grid.lon_max + step[1] + 1e-9, step[1])
     CL, CO = np.meshgrid(clat, clon, indexing="ij")
@@ -292,7 +301,10 @@ def _kernel_field(grid, lat, lon, val, sigma_km, cutoff_km, step=(0.05, 0.1)):
     I, J = np.meshgrid(fi, fj, indexing="ij")
     Vu = map_coordinates(V, [I, J], order=1, mode="nearest")
     Wu = map_coordinates(W, [I, J], order=1, mode="nearest")
-    return np.where(Wu >= np.exp(-0.5 * (cutoff_km / sigma_km) ** 2), Vu, np.nan)
+    w_min = np.exp(-0.5 * (cutoff_km / sigma_km) ** 2)
+    ok = Wu >= w_min
+    cov = np.where(ok, np.clip((Wu - w_min) / (np.exp(-0.5) - w_min), 0.0, 1.0), 0.0)
+    return np.where(ok, Vu, np.nan), cov
 
 
 def _sigmoid(x):
@@ -304,12 +316,22 @@ def _log(p):
         return np.log(np.asarray(p, float))
 
 
-def _nanmean(*arrs):
-    stack = np.stack(arrs)
-    n = np.isfinite(stack).sum(axis=0)
-    s = np.where(np.isfinite(stack), stack, 0.0).sum(axis=0)
+def _wmean(parts):
+    """Coverage-weighted mean of (loglik, weight) pairs; NaN where no weight."""
+    num = np.zeros(parts[0][0].shape)
+    den = np.zeros(parts[0][0].shape)
+    for ll, w in parts:
+        w = np.where(np.isfinite(ll), w, 0.0)
+        num += w * np.where(np.isfinite(ll), ll, 0.0)
+        den += w
     with np.errstate(invalid="ignore", divide="ignore"):
-        return np.where(n > 0, s / np.maximum(n, 1), np.nan)
+        return np.where(den > 1e-6, num / np.maximum(den, 1e-12), np.nan)
+
+
+def _taper(grid, covered, sigma_km):
+    """Weight 1 well inside a covered region, falling smoothly to 0 at its edge."""
+    q = _soften(grid, covered, sigma_km)
+    return np.where(covered, np.clip(2.0 * q - 1.0, 0.0, 1.0), 0.0)
 
 
 def _include_defaultno(cfg):
@@ -348,7 +370,8 @@ def _utelukket_ll(grid, mesh):
     L, O = mesh
     extent = (L >= lat.min() - dlat / 2) & (L <= lat.max() + dlat / 2) & (O <= lon.max() + dlon / 2) \
         & (O >= max(lon.min() - dlon / 2, UTELUKKET_WEST_FILL_LON))
-    return np.where(extent & (c < 0.5), ll, np.nan)
+    covered = extent & (c < 0.5)
+    return np.where(covered, ll, np.nan), _taper(grid, covered, UTELUKKET_SIGMA_KM)
 
 
 def sun_2309(grid, src, mesh):
@@ -358,7 +381,7 @@ def sun_2309(grid, src, mesh):
         q = _soften(grid, _inside(grid, ring, mesh), SOL_SIGMA_KM)
         p += q * (p_in - SOL_P_OUT)
     ll_sol = _log(np.clip(p, SOL_P_OUT, 1.0))
-    ll = _nanmean(ll_sol, _utelukket_ll(grid, mesh))
+    ll = _wmean([(ll_sol, np.ones(grid.shape)), _utelukket_ll(grid, mesh)])
     return LayerResult(
         "weather_sun_2309_clear_areas", ll, reliability=0.40, independence_group="sky_2309",
         description="Sun at the box 23.09 while the satellite showed cloud over most of Norway: mean of "
@@ -385,12 +408,12 @@ def fog_2309(grid, src, mesh):
 def calm_2309(grid):
     d = json.load(open(PUBLIC / "vind.json"))
     a = np.array(d["celler"], float)
-    v = _kernel_field(grid, a[:, 0], a[:, 1], a[:, 2], sigma_km=10.0, cutoff_km=25.0)
+    v, _ = _kernel_field(grid, a[:, 0], a[:, 1], a[:, 2], sigma_km=10.0, cutoff_km=25.0)
     p = 0.15 + 0.85 / (1.0 + np.exp((v - 4.0) / 0.8))
     return LayerResult(
         "weather_calm_2309_1749", _log(p), reliability=0.45, independence_group="wind_2309_1749",
         description="23.09 17:49 «VINDSTILLE» vs. open-meteo (MET Nordic) 10 m wind at 17:49; "
-                    "P = 0.15 + 0.85/(1+exp((v-4)/0.8)), 2 m/s 0.93, 4 m/s 0.58, 6 m/s 0.2",
+                    "P = 0.15 + 0.85/(1+exp((v-4)/0.8)), 2 m/s 0.93, 4 m/s 0.58, 6 m/s 0.21",
         sources=["tavla 23.09 17:49", f"vind.json ({d.get('kilde')}, {d.get('tid')})"])
 
 
@@ -413,28 +436,28 @@ def _radar_ll(grid, mesh):
     p = map_coordinates(p_img, [row, col], order=1, mode="nearest")
     ky, kx = _cell_km(grid)
     p = gaussian_filter(p, sigma=(RADAR_SIGMA_KM / ky, RADAR_SIGMA_KM / kx), mode="nearest", truncate=3.0)
-    return np.where(inside, _log(p), np.nan), meta["tid"]
+    return np.where(inside, _log(p), np.nan), _taper(grid, inside, 15.0), meta["tid"]
 
 
 def overcast_2409(grid, mesh, use_radar=True):
     parts, used = [], []
     m = np.array(json.load(open(DEFAULTNO / "met.json"))["punkter"], dtype=float)
-    cloud = _kernel_field(grid, m[:, 0], m[:, 1], m[:, 3], sigma_km=10.0, cutoff_km=25.0)
-    parts.append(_log(0.4 + 0.6 * _sigmoid((cloud - 45.0) / 12.0)))
+    cloud, w = _kernel_field(grid, m[:, 0], m[:, 1], m[:, 3], sigma_km=10.0, cutoff_km=25.0)
+    parts.append((_log(0.4 + 0.6 * _sigmoid((cloud - 45.0) / 12.0)), w))
     used.append("met.json cloud % 24.09 18:07")
     st = json.load(open(DEFAULTNO / "vaer.json"))["stasjoner"]
     rise = np.array([np.nan if s.get("stigning") is None else s["stigning"] for s in st], float)
     slat = np.array([s["lat"] for s in st], float)
     slon = np.array([s["lon"] for s in st], float)
-    rise_f = _kernel_field(grid, slat, slon, rise, sigma_km=20.0, cutoff_km=50.0)
-    parts.append(_log(0.3 + 0.7 * _sigmoid((2.5 - rise_f) / 0.6)))
+    rise_f, w = _kernel_field(grid, slat, slon, rise, sigma_km=20.0, cutoff_km=50.0)
+    parts.append((_log(0.3 + 0.7 * _sigmoid((2.5 - rise_f) / 0.6)), w))
     used.append("vaer.json station warming dawn->11:00 24.09")
     if use_radar:
-        ll_radar, tid = _radar_ll(grid, mesh)
-        parts.append(ll_radar)
+        ll_radar, w, tid = _radar_ll(grid, mesh)
+        parts.append((ll_radar, w))
         used.append(f"radar.png {tid}")
     return LayerResult(
-        "weather_overcast_2409", _nanmean(*parts), reliability=0.40, independence_group="overcast_2409",
+        "weather_overcast_2409", _wmean(parts), reliability=0.40, independence_group="overcast_2409",
         description="24.09 «GRÅVÆR HELE DAGEN»: mean over components of log P - cloud at 18:07 "
                     "(P=0.4+0.6*sig((c-45)/12)), little morning warming (P=0.3+0.7*sig((2.5-dT)/0.6))"
                     + (", no heavy radar echo at 18:35" if use_radar else ""),
@@ -446,7 +469,7 @@ def rain_2409(grid):
     r = np.array([np.nan if s.get("regn") is None else s["regn"] for s in st], float)
     slat = np.array([s["lat"] for s in st], float)
     slon = np.array([s["lon"] for s in st], float)
-    rf = _kernel_field(grid, slat, slon, r, sigma_km=20.0, cutoff_km=50.0)
+    rf, _ = _kernel_field(grid, slat, slon, r, sigma_km=20.0, cutoff_km=50.0)
     p = 0.4 + 0.6 * (1.0 - np.exp(-np.maximum(rf, 0.0) / 0.3))
     return LayerResult(
         "weather_rain_2409_morning", _log(p), reliability=0.25, independence_group="rain_2409_1105",
