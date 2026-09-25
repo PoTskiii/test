@@ -40,9 +40,10 @@ sun_pixel
      covers the whole domain), and nothing is reported in IR mode;
    * the solar azimuth should lie within the configured camera heading +- (hfov/2 + 25
      deg), otherwise confidence x0.4 (the heading is only approximately known);
-   * a "sun" that stays within 4 px for more than 15 min is a static glare (lamp, sign,
-     reflection). The real sun moves ~0.25 deg/min, i.e. ~60 px in 15 min at 1280 px/70 deg,
-     so static glares are suppressed;
+   * a "sun" that stays within ``static_px`` (4 px at 1280, scaled with the width) of an
+     earlier detection, once the sun must have moved >= 4 x that (>= 0.2 deg/min lower bound
+     of the solar rate, i.e. ~5 min at 1280 px/70 deg; never before ``static_after_s``), is a
+     static glare (lamp, sign, reflection, a round clipped canopy gap) and is suppressed;
    * a position consistent with the previous detection at the solar angular rate earns a
      small bonus.
    Emitted every ``interval_s`` with value = {x, y (full-res px), xn, yn (x/w, y/h), radius,
@@ -85,8 +86,8 @@ import numpy as np
 
 from ..types import Observation
 from .base import Analyzer, Context
-from .sky import (clean, downscale, focal_px, frame_ir_mode, luma, rect_mask, site_from_config, sky_mask_for,
-                  solar_altaz)
+from .sky import (clean, downscale, focal_px, frame_ir_mode, luma, rect_mask, rgb_frame, site_from_config,
+                  sky_mask_for, solar_altaz)
 
 log = logging.getLogger("hordewatch.sun")
 
@@ -380,8 +381,9 @@ DEFAULTS = {
     "min_score": 0.3,
     "min_sun_alt": -3.0,
     "az_margin_deg": 25.0,
-    "static_px": 4.0,
-    "static_after_s": 900.0,
+    "static_px": 4.0,                    # at 1280 px width (scaled with the frame width, >= 1.5 px)
+    "static_after_s": 300.0,             # never call a detection static earlier than this ...
+    "sun_min_rate_deg_min": 0.2,         # ... nor before the sun must have moved >= 4 x static_px (15 deg/h cos(dec))
     "shadow_roi_norm": [0.0, 0.55, 1.0, 1.0],
     "shadow_work_width": 320,
     "shadow_min_coherence": 0.25,
@@ -418,6 +420,7 @@ class SunAnalyzer(Analyzer):
         return last is None or t - last >= interval - 1e-6 or t < last
 
     def on_frame(self, frame, ctx: Context):
+        frame = rgb_frame(frame)
         t = frame.real_ts.timestamp()
         st = ctx.state.setdefault("sun", {})
         alt, az = solar_altaz(t, *self.site)
@@ -457,15 +460,22 @@ class SunAnalyzer(Analyzer):
         while self.history and self.history[0][0] < t - 3 * 3600:
             self.history.popleft()
         x, y = det["x"], det["y"]
-        static = any(t - th >= self.p["static_after_s"] and math.hypot(x - xh * W / wh, y - yh * W / wh) < self.p["static_px"]
+        f = focal_px(self.config, W)
+        px_per_deg = f * math.pi / 180.0
+        # Static glare (lamp, sign, a round clipped canopy gap, a reflection): the real sun moves at
+        # >= 0.23 deg/min on the sky (15 deg/h x cos(dec), |dec| <= 23.4 deg). A detection that stays
+        # within static_px of an earlier one, after the sun must have moved >= 4 x static_px, is not the
+        # sun. At 1280 px / 70 deg that is ~5 min (was a fixed 15 min: 15 min of false sun_pixel rows).
+        spx = max(1.5, float(self.p["static_px"]) * W / 1280.0)
+        rate = float(self.p["sun_min_rate_deg_min"]) / 60.0 * px_per_deg          # px/s, lower bound
+        static = any(t - th >= self.p["static_after_s"] and rate * (t - th) >= 4.0 * spx
+                     and math.hypot(x - xh * W / wh, y - yh * W / wh) < spx
                      for th, xh, yh, wh in self.history)
         self.history.append((t, x, y, W))
         if static:
             self.n_static += 1
             log.debug("sun: static glare at (%.0f, %.0f) ignored", x, y)
             return None
-        f = focal_px(self.config, W)
-        px_per_deg = f * math.pi / 180.0
         consistent = False
         for th, xh, yh, wh in reversed(self.history):
             dt = t - th

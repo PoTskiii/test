@@ -440,39 +440,62 @@ class SkyMaskModel:
 
 # ============================================================================ twilight light curve
 class TwilightTracker:
-    """Online sustained-threshold-crossing detector on a binned log-luma light curve (per mode)."""
+    """Online sustained-threshold-crossing detector on a binned log-luma light curve (per mode).
+
+    Samples are binned online (``bin_s``): a completed bin keeps only (mean time, median log luma),
+    so memory and scan cost do not depend on the frame rate (a 0.25-s burst for strobe timing
+    would otherwise put ~40 000 raw samples into the 3-h window). A sample more than
+    ``reset_back_s`` older than the previous one (a replay restarting at an earlier file, a clock
+    reset) starts a fresh series for that mode instead of mixing two evenings."""
 
     def __init__(self, thresholds=(100.0, 50.0, 25.0, 12.0), bin_s=60.0, hold_s=600.0, pre_s=600.0,
                  max_gap_s=180.0, fit_half_s=600.0, dedupe_s=4 * 3600.0, margin=0.1, keep_s=3 * 3600.0,
-                 alt_window=(-18.0, 12.0), site=DEFAULT_SITE, gate=True):
+                 alt_window=(-18.0, 12.0), site=DEFAULT_SITE, gate=True, reset_back_s=600.0):
         self.thresholds = [float(t) for t in thresholds]
         self.bin_s, self.hold_s, self.pre_s = float(bin_s), float(hold_s), float(pre_s)
         self.max_gap_s, self.fit_half_s, self.dedupe_s = float(max_gap_s), float(fit_half_s), float(dedupe_s)
         self.margin, self.keep_s = float(margin), float(keep_s)
         self.alt_window, self.site, self.gate = tuple(alt_window), tuple(site), bool(gate)
-        self.series = {}
+        self.reset_back_s = float(reset_back_s)
+        self.series = {}          # mode -> deque of completed bins (t_mean, median log luma)
+        self._cur = {}            # mode -> [bin index, [t...], [log luma...]] (bin being filled)
+        self._last_t = {}
         self.emitted = []
-        self._scanned = {}
 
     def add(self, t: float, value: Optional[float], mode: str = "day") -> list:
         if value is None or not np.isfinite(value) or value <= 0:
             return []
+        t, lv = float(t), math.log(float(value))
+        last = self._last_t.get(mode)
+        if last is not None and t < last - self.reset_back_s:
+            log.info("sky: light-curve time went back %.0f s (%s): new series", last - t, mode)
+            self.series.pop(mode, None)
+            self._cur.pop(mode, None)
+        self._last_t[mode] = t
         d = self.series.setdefault(mode, deque())
-        d.append((float(t), math.log(float(value))))
+        b = int(t // self.bin_s)
+        cur = self._cur.get(mode)
+        if cur is None:
+            self._cur[mode] = [b, [t], [lv]]
+            return []
+        if b <= cur[0]:                           # same bin (or a few seconds out of order after a latency update)
+            cur[1].append(t)
+            cur[2].append(lv)
+            return []
+        d.append((float(np.mean(cur[1])), float(np.median(cur[2]))))   # previous bin complete
+        self._cur[mode] = [b, [t], [lv]]
         while d and d[0][0] < t - self.keep_s:
             d.popleft()
-        b = int(t // self.bin_s)
-        if self._scanned.get(mode) == b:          # scan once per completed bin (cheap at 5-s frames)
-            return []
-        self._scanned[mode] = b
-        return self._scan(mode, float(t))
+        self.emitted = [e for e in self.emitted if abs(t - e[3]) < self.dedupe_s + self.keep_s]
+        return self._scan(mode, t)                # once per completed bin
 
     def _binned(self, mode):
-        a = np.array(self.series[mode], np.float64)
-        b = np.floor(a[:, 0] / self.bin_s).astype(np.int64)
-        ub, idx = np.unique(b, return_inverse=True)
-        tb = np.bincount(idx, a[:, 0]) / np.bincount(idx)
-        vb = np.array([np.median(a[idx == k, 1]) for k in range(len(ub))])
+        rows = list(self.series[mode])
+        cur = self._cur.get(mode)
+        if cur is not None:                       # include the bin being filled (as the batch version did)
+            rows.append((float(np.mean(cur[1])), float(np.median(cur[2]))))
+        a = np.array(rows, np.float64).reshape(-1, 2)
+        tb, vb = a[:, 0], a[:, 1]
         n = len(vb)
         sm = np.empty(n)
         for i in range(n):
@@ -486,7 +509,7 @@ class TwilightTracker:
 
     def _scan(self, mode, now):
         d = self.series[mode]
-        if len(d) < 8 or d[-1][0] - d[0][0] < self.pre_s + self.hold_s:
+        if len(d) < 8 or now - d[0][0] < self.pre_s + self.hold_s:
             return []
         tb, sm = self._binned(mode)
         out = []
@@ -568,6 +591,10 @@ DEFAULTS = {
     "twilight_max_gap_s": 180.0,
     "twilight_sun_alt_window": [-18.0, 12.0],
     "twilight_gate": True,
+    "direct_sun_min_alt": 2.0,           # below: no direct_sun row at all (a forest horizon hides the sun)
+    "direct_sun_low_alt": 8.0,           # below: "no sun" is weak evidence (trunks/terrain), confidence x0.6
+    "direct_sun_void_luma": 12.0,        # ground pixels darker than this are voids / under-exposure: ignored
+    "direct_sun_warm_min": 0.05,         # sunlit must be warmer than shade (linear log R/B) when measurable
     "cloud_rb_threshold": 0.78,
     "cloud_min_px": 30,
     "cloud_max_clipped": 0.6,
@@ -651,10 +678,10 @@ class SkyAnalyzer(Analyzer):
         except Exception as e:
             log.warning("sky: could not save sky mask to %s: %s", d, e)
 
-    def _obs(self, kind, frame, value, conf, ts=None, frame_id="frame"):
+    def _obs(self, kind, frame, value, conf, ts=None, frame_id="frame", ts_capture=None):
         return Observation(kind=kind, ts=ts or frame.real_ts, value=clean(value), analyzer=self.name,
                            confidence=float(conf), frame_id=frame.id if frame_id == "frame" else frame_id,
-                           ts_capture=frame.capture_ts)
+                           ts_capture=ts_capture or frame.capture_ts)
 
     @staticmethod
     def _due(last, t, interval):
@@ -663,6 +690,7 @@ class SkyAnalyzer(Analyzer):
     # ------------------------------------------------------------------ main
     def on_frame(self, frame, ctx: Context):
         out = []
+        frame = rgb_frame(frame)
         img = frame.image
         H, W = img.shape[:2]
         small, _ = downscale(img, int(self.p["work_width"]))
@@ -678,10 +706,12 @@ class SkyAnalyzer(Analyzer):
         self._ensure_model((h, w), ctx)
         score = SkyMaskModel.score(small, Y, ir, self.p["sky_max_y"])
         updated = False
-        if not ir and alt > self.p["mask_min_sun_alt"] and np.percentile(Y, 98) > 60:
+        lit = not ir and np.percentile(Y, 98) > 60
+        if lit and alt > self.p["mask_min_sun_alt"]:
             self.model.update(score)
             updated = True
-        mask, mstate = self.model.mask(score)
+        # bootstrap only from a lit colour frame (dawn / dusk colour frames are fine; IR is not)
+        mask, mstate = self.model.mask(score if lit else None)
         st["mask"], st["mask_state"], st["mask_n"] = mask, mstate, self.model.n
         if updated and self.model.n >= self.model.min_frames and (
                 self.model.n == self.model.min_frames or self.model.n % int(self.p["mask_save_every"]) == 0):
@@ -704,12 +734,17 @@ class SkyAnalyzer(Analyzer):
 
         # ---- twilight light curve (every frame; markers only from the learned/bootstrapped sky)
         if region == "sky":
+            lat_s = (frame.capture_ts - frame.real_ts).total_seconds()
             for m in self.twilight.add(t, sky_luma, "ir" if ir else "day"):
                 tc = datetime.fromtimestamp(m["t"], UTC)
-                val = {"luma": m["threshold"], "region": "twilight_marker", "ir_mode": ir,
+                # no frame_id (the marker is a light-curve product, ~10 min older than this frame): carry the
+                # latency explicitly and a capture time *of the crossing*, so bridges.common.observation_latencies
+                # does not read the 10-min detection delay as stream latency
+                val = {"luma": m["threshold"], "region": "twilight_marker", "ir_mode": ir, "latency_s": lat_s,
                        "twilight_marker": {**m, "t_cross": iso(tc)}}
                 conf = 0.55 if m.get("slope_per_min") is not None and abs(m["slope_per_min"]) > 0.005 else 0.35
-                out.append(self._obs("sky_photometry", frame, val, conf, ts=tc, frame_id=None))
+                out.append(self._obs("sky_photometry", frame, val, conf, ts=tc, frame_id=None,
+                                     ts_capture=datetime.fromtimestamp(m["t"] + lat_s, UTC)))
                 log.info("sky: twilight marker %s %s luma %g at %s", m["event"], m["mode"], m["threshold"], iso(tc))
 
         # ---- photometry
@@ -810,11 +845,31 @@ class SkyAnalyzer(Analyzer):
 
     # ------------------------------------------------------------------ direct sun
     def _direct_sun(self, frame, ctx, small, Y, mask, alt):
-        if alt < -1.0:                   # sun down everywhere in the domain: nothing to say
+        """Hard-shadow detector (see the module docstring). Two physical guards against the classic
+        false positive, an overcast forest floor with *albedo* contrast (pale lichen / heather vs
+        dark voids under spruce, easily > 10x in luminance):
+
+        * near-black pixels (8-bit luma < ``direct_sun_void_luma``) are voids or under-exposure,
+          not sky-lit shade, and are left out of the luminance statistics (``void_frac``);
+        * colour veto: under direct sun the sunlit class is lit by sun + sky and the shade by the
+          blue sky alone, so the sunlit class must be *warmer* (linear log R/B, which is invariant
+          to exposure and auto white balance within one frame). Under overcast, bright and dark
+          surfaces share one illuminant and the shift is ~0 or negative. When both classes have
+          enough non-black pixels to measure it, present needs warm_shift >= ``direct_sun_warm_min``.
+
+        No row at all when the sun is below ``direct_sun_min_alt`` at the approximate site (the
+        met bridge would read "present: False" as evidence for cloud). Below ``direct_sun_low_alt``,
+        "no sun" gets less confidence, because trunks and terrain hide a low sun even under a clear sky."""
+        if alt <= self.p["direct_sun_min_alt"]:
             shared(ctx)["direct_sun"] = False
             return None
         h, w = Y.shape
-        ground = ~mask & (np.arange(h)[:, None] >= 0.45 * h) & ~rect_mask(h, w, self.p["exclude_norm"])
+        ground0 = ~mask & (np.arange(h)[:, None] >= 0.45 * h) & ~rect_mask(h, w, self.p["exclude_norm"])
+        if ground0.sum() < 50:
+            return None
+        void = ground0 & (Y < self.p["direct_sun_void_luma"])
+        ground = ground0 & ~void
+        void_frac = float(void.sum() / ground0.sum())
         if ground.sum() < 50:
             return None
         f = small.astype(np.float32)
@@ -831,20 +886,30 @@ class SkyAnalyzer(Analyzer):
         shade = ground & (ll < thr)
         sunlit_fraction = float(bright.sum() / ground.sum()) if class_ratio >= 3.0 else 0.0
         warm = None
-        if bright.sum() >= 5 and shade.sum() >= 5:
-            lrb = np.log((f[..., 0] + 4.0) / (f[..., 2] + 4.0))
-            warm = float(lrb[bright].mean() - lrb[shade].mean())
+        # colour only where every channel is above the quantisation / noise floor and none is clipped
+        okc = (f.min(axis=2) >= 10.0) & (f.max(axis=2) < 250.0)
+        if (bright & okc).sum() >= 5 and (shade & okc).sum() >= 5:
+            lr = srgb_to_linear(f[..., 0]).astype(np.float32)
+            lb = srgb_to_linear(f[..., 2]).astype(np.float32)
+            lrb = np.log((lr + 1e-3) / (lb + 1e-3))
+            warm = float(lrb[bright & okc].mean() - lrb[shade & okc].mean())
         s_dyn = float(np.clip((np.log10(dyn) - 0.8) / 0.6, 0, 1))
         s_cls = float(np.clip((class_ratio - 2.0) / 2.0, 0, 1)) * float(np.clip(sunlit_fraction / 0.05, 0, 1))
-        s_warm = 0.5 if warm is None else float(np.clip(warm / 0.15, 0, 1))
+        s_warm = 0.5 if warm is None else float(np.clip(warm / 0.3, 0, 1))
         score = 0.3 * s_dyn + 0.5 * s_cls + 0.2 * s_warm
-        present = bool(score > 0.55 and alt > 2.0)
+        colour_ok = warm is None or warm >= self.p["direct_sun_warm_min"]
+        present = bool(score > 0.55 and colour_ok)
         shared(ctx)["direct_sun"] = present
         shared(ctx)["direct_sun_score"] = score
-        conf = 0.25 + 0.3 * abs(score - 0.55) / 0.45 if alt > 2.0 else 0.5
+        conf = 0.25 + 0.3 * abs(score - 0.55) / 0.45
+        if not present and alt < self.p["direct_sun_low_alt"]:
+            conf *= 0.6
+        if present and warm is None:
+            conf *= 0.8
         return self._obs("direct_sun", frame, {
-            "present": present, "sunlit_fraction": sunlit_fraction, "dynamic_range": dyn, "class_ratio": class_ratio,
-            "warm_shift": warm, "score": score, "sun_alt_approx_deg": alt}, min(conf, 0.55))
+            "present": present, "sunlit_fraction": sunlit_fraction if colour_ok else 0.0,
+            "dynamic_range": dyn, "class_ratio": class_ratio, "warm_shift": warm, "colour_veto": not colour_ok,
+            "void_frac": void_frac, "score": score, "sun_alt_approx_deg": alt}, min(conf, 0.55))
 
     # ------------------------------------------------------------------ fog
     @staticmethod

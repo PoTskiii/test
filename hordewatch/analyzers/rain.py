@@ -16,6 +16,8 @@ rain_visual
   - a new drop is a peak of D_t - g D_{t-2} above max(5 robust sigma, 6 levels), where g is
     the least-squares gain, so a global light or exposure change cancels;
   - it must already be present at t-1 (D_{t-1} - g' D_{t-2} > 0.6 thr);
+  - it must be unchanged between t-1 and t (|D_t - g'' D_{t-1}| < 0.5 of the t-2 -> t change):
+    swaying twigs and grass behind the transparent walls move a little every frame and fail this;
   - edge-like responses are rejected by the Hessian ratio test (tr^2/det < (r+1)^2/r, r = 5).
   Static texture of any strength cancels in the difference, so near-threshold bark or heather
   blobs cannot flicker into "new drops". Blobs inside large changed regions are ignored
@@ -26,7 +28,7 @@ rain_visual
 * Streaks: falling drops are motion-blurred into short near-vertical lines (very visible
   under the IR illuminator at night). They are transient: positive frame difference >
   max(5 sigma, 10), components with aspect >= 3, length 4-60 px and orientation within
-  25 deg of vertical.
+  25 deg of vertical, and without a negative-difference partner within 5 px (a moved twig).
 * Wet-surface darkening: wet ground has a lower albedo. The ground-band luma relative to
   sky luma (roughly exposure-invariant) is compared with a dry baseline. It is only a
   supporting cue (weight 0.2), because clouds change it too.
@@ -66,7 +68,7 @@ import numpy as np
 
 from ..types import Observation
 from .base import Analyzer, Context
-from .sky import clean, downscale, frame_ir_mode, luma, rect_mask, sky_mask_for
+from .sky import clean, downscale, frame_ir_mode, luma, rect_mask, rgb_frame, sky_mask_for
 
 log = logging.getLogger("hordewatch.rain")
 
@@ -86,15 +88,20 @@ def _gain(a: np.ndarray, b: np.ndarray, roi: np.ndarray) -> float:
 
 def new_persistent_blobs(d0: np.ndarray, d1: np.ndarray, d2: np.ndarray, g1: np.ndarray, roi: np.ndarray,
                          s2: float, k_sigma: float = 5.0, min_amp: float = 6.0, ignore: Optional[np.ndarray] = None,
-                         edge_r: float = 5.0, max_blobs: int = 3000):
+                         edge_r: float = 5.0, max_blobs: int = 3000, stable_frac: float = 0.5):
     """Blobs that are present at t (d0) and t-1 (d1) but were absent at t-2 (d2): drops that landed and stuck.
 
     Works on DoG *changes* (d0 - g d2, d1 - g' d2 with least-squares gains), so static texture -
     however strong - cancels, and near-threshold texture cannot flicker into a "new" blob.
+    A stuck drop is also *unchanged* between t-1 and t: the change d0 - g'' d1 at the peak must be
+    below ``stable_frac`` of the t-2 -> t change. This rejects swaying twig tips and grass seen
+    through the transparent box (each frame at a slightly different place: present at t and t-1
+    in a 3x3 neighbourhood, but never the same), the dominant false alarm in wind.
     Returns ((N, 3) [x, y, polarity], noise sigma, threshold).
     """
     dd = d0 - _gain(d0, d2, roi) * d2
     dd1 = d1 - _gain(d1, d2, roi) * d2
+    dd01 = np.abs(d0 - _gain(d0, d1, roi) * d1)
     vals = dd[roi]
     if vals.size < 50:
         return np.zeros((0, 3), np.float32), 0.0, 0.0
@@ -112,7 +119,8 @@ def new_persistent_blobs(d0: np.ndarray, d1: np.ndarray, d2: np.ndarray, g1: np.
     out = []
     for pol in (1.0, -1.0):
         a = pol * dd
-        pk = (a >= cv2.dilate(a, ker)) & (a > thr) & valid & (cv2.dilate(pol * dd1, np.ones((3, 3), np.uint8)) > 0.6 * thr)
+        pk = ((a >= cv2.dilate(a, ker)) & (a > thr) & valid & (cv2.dilate(pol * dd1, np.ones((3, 3), np.uint8)) > 0.6 * thr)
+              & (dd01 < stable_frac * a))
         ys, xs = np.nonzero(pk)
         if len(xs) > max_blobs:
             o = np.argsort(-a[ys, xs])[:max_blobs]
@@ -122,14 +130,25 @@ def new_persistent_blobs(d0: np.ndarray, d1: np.ndarray, d2: np.ndarray, g1: np.
 
 
 def detect_streaks(Y: np.ndarray, Yprev: np.ndarray, roi: np.ndarray, ignore: np.ndarray, k_sigma: float = 5.0,
-                   min_len: float = 4.0, max_len: float = 60.0, max_tilt_deg: float = 25.0) -> int:
-    """Count transient thin near-vertical bright streaks (falling rain) in the positive frame difference."""
+                   min_len: float = 4.0, max_len: float = 60.0, max_tilt_deg: float = 25.0, moved_px: int = 5,
+                   moved_frac: float = 0.3) -> int:
+    """Count transient thin near-vertical bright streaks (falling rain) in the positive frame difference.
+
+    A thin object that *moved* (a hanging birch twig, grass, a cord swaying in the wind) leaves a
+    positive difference where it is now and a negative one where it was, a few px away. A rain
+    streak has no such partner (the streaks of the previous frame are elsewhere). Components with
+    >= ``moved_frac`` of their pixels within ``moved_px`` of the opposite-sign difference are
+    therefore not counted. In heavy rain (~40 streaks) the negative streaks cover ~3 % of the
+    ROI, so few true streaks are lost."""
     D = Y - Yprev
     vals = D[roi]
     if vals.size < 50:
         return 0
     sigma = 1.4826 * float(np.median(np.abs(vals - np.median(vals)))) + 1e-3
-    m = ((D > max(k_sigma * sigma, 10.0)) & roi & ~ignore).astype(np.uint8)
+    lev = max(k_sigma * sigma, 10.0)
+    m = ((D > lev) & roi & ~ignore).astype(np.uint8)
+    k = 2 * int(moved_px) + 1
+    neg_near = cv2.dilate((D < -lev).astype(np.uint8), np.ones((k, k), np.uint8)) > 0
     n, lab, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
     cnt = 0
     for k in range(1, n):
@@ -139,6 +158,8 @@ def detect_streaks(Y: np.ndarray, Yprev: np.ndarray, roi: np.ndarray, ignore: np
         bx, by, bw, bh = stats[k, :4]
         ys, xs = np.nonzero(lab[by:by + bh, bx:bx + bw] == k)
         if len(xs) < 3:
+            continue
+        if float(neg_near[by + ys, bx + xs].mean()) >= moved_frac:      # a moved thin object, not a falling drop
             continue
         (cx, cy), (rw, rh), ang = cv2.minAreaRect(np.stack([xs, ys], 1).astype(np.float32))
         L, Wd = max(rw, rh), max(min(rw, rh), 1.0)
@@ -225,6 +246,7 @@ class RainAnalyzer(Analyzer):
 
     def on_frame(self, frame, ctx: Context):
         out = []
+        frame = rgb_frame(frame)
         ir = frame_ir_mode(frame, ctx)
         mode = "ir" if ir else "day"
         t = frame.real_ts.timestamp()

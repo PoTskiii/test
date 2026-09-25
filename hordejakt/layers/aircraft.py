@@ -30,6 +30,8 @@ BOX = (58.0, 64.5, 4.5, 13.5)
 OBSERVER_M = 600.0  # rough terrain height of the box (m a.s.l.); altitudes are ft AMSL
 
 
+FLY_2130_LABEL_LAG_S = 45
+RAW_TRACES = {"NOZ9EG": "trace_4791ac.json", "NOZ56U": "trace_47a3b0.json"}
 MIN_FT = 8000  # airliner-class traffic; low GA/helicopter traffic near airfields is not what she described
 
 
@@ -70,17 +72,22 @@ def events(cfg):
     """Returns list of dicts: name, positions [(lat, lon, alt_m)...] grouped per aircraft, params."""
     ev = []
     # --- 21.09: pointed up at 21:29:38 stream time; stream delay ~15-60 s -> real ~21:28:38-21:29:23
+    # fly_2130.json labels are 45 s EARLY: the position labelled t happened at real t + 45 s
+    # (verified against the raw adsb.lol traces: 0.23 km mean error at +45 s vs 10.8 km at 0 s).
     d = json.load(open(MAGNUS / "public" / "data" / "fly_2130.json"))
-    t0, t1 = _hms("21:28:30"), _hms("21:29:30")
+    t0, t1 = _hms("21:28:30"), _hms("21:29:30")  # real (CEST) window
     ac = {}
     for f in d["fly"]:
         pos = []
         for t in range(t0, t1 + 1, 10):
-            p = _interp_track(f["spor"], t)
+            p = _interp_track(f["spor"], t - FLY_2130_LABEL_LAG_S)
             if p and p[2] > MIN_FT:
                 pos.append((p[0], p[1], p[2] * FT))
         if pos:
             ac[f["kallesignal"]] = pos
+    # exact raw traces for the two candidate aircraft, when the evidence branch is present
+    for callsign, pos in _raw_trace_positions(t0, t1).items():
+        ac[callsign] = pos
     ev.append({"name": "2109_2129_point", "aircraft": ac, "reliability": 0.75,
                "desc": "21.09 21:29:38 (stream) Anja points up, writes «FLY» 21:30:12; ADS-B fly_2130.json, delay 15-60 s"})
 
@@ -117,6 +124,35 @@ def events(cfg):
     ev.append({"name": "2509_1722_point", "aircraft": ac, "reliability": 0.45, "floor": 0.15,
                "desc": "25.09 17:22 (stream) pointed up; SAS50J track only (SAS364 over Rena untracked), overcast day"})
     return ev
+
+
+def _raw_trace_positions(t0, t1, day="2026-09-21"):
+    """Positions every 10 s in the real CEST window [t0, t1] (seconds of day) from adsb.lol traces."""
+    import gzip
+    from datetime import datetime, timedelta, timezone
+    from .. import RAW
+    out = {}
+    base_day = datetime.fromisoformat(day).replace(tzinfo=timezone(timedelta(hours=2))).timestamp()
+    for callsign, fn in RAW_TRACES.items():
+        path = RAW / "mk_bevis" / "bevis" / "claude-2026-09-25" / "adsb" / fn
+        if not path.exists():
+            continue
+        tr = json.loads(gzip.open(path).read())
+        pts = [(tr["timestamp"] + p[0], p[1], p[2], p[3]) for p in tr["trace"]
+               if p[1] is not None and isinstance(p[3], (int, float))]
+        if not pts:
+            continue
+        T, La, Lo, Al = (np.array(c, float) for c in zip(*pts))
+        pos = []
+        for t in range(t0, t1 + 1, 10):
+            ts = base_day + t
+            if T[0] <= ts <= T[-1]:
+                alt = float(np.interp(ts, T, Al))
+                if alt > MIN_FT:
+                    pos.append((float(np.interp(ts, T, La)), float(np.interp(ts, T, Lo)), alt * FT))
+        if pos:
+            out[callsign] = pos
+    return out
 
 
 def _read_fly_2509():

@@ -3,864 +3,864 @@
   {
    "name": "base",
    "weight": 3.0,
-   "credible_km2_50": 817.8
+   "credible_km2_50": 795.2
   },
   {
    "name": "elevation_literal",
    "weight": 1.5,
-   "credible_km2_50": 127.9
+   "credible_km2_50": 113.6
   },
   {
    "name": "elevation_not_elevation",
    "weight": 1.5,
-   "credible_km2_50": 1162.2
+   "credible_km2_50": 1282.6
   },
   {
    "name": "monday_pickup",
    "weight": 1.0,
-   "credible_km2_50": 704.5
+   "credible_km2_50": 907.6
   },
   {
    "name": "sunday_pickup",
    "weight": 1.0,
-   "credible_km2_50": 804.4
+   "credible_km2_50": 699.1
   },
   {
    "name": "no_organizer_prior",
    "weight": 0.75,
-   "credible_km2_50": 1118.2
+   "credible_km2_50": 1089.3
   },
   {
    "name": "no_se_approach",
    "weight": 1.0,
-   "credible_km2_50": 801.1
+   "credible_km2_50": 776.2
   },
   {
    "name": "aircraft_strong",
    "weight": 1.0,
-   "credible_km2_50": 551.0
+   "credible_km2_50": 522.8
   },
   {
    "name": "aircraft_weak",
    "weight": 1.0,
-   "credible_km2_50": 5068.0
+   "credible_km2_50": 4981.7
   },
   {
    "name": "no_defaultno",
    "weight": 1.0,
-   "credible_km2_50": 616.8
+   "credible_km2_50": 586.4
   },
   {
    "name": "forest_strong",
    "weight": 0.75,
-   "credible_km2_50": 828.2
+   "credible_km2_50": 774.4
   }
  ],
  "credible_km2": {
   "0.5": 860.3,
-  "0.8": 6159.7,
-  "0.9": 19866.3
+  "0.8": 5983.9,
+  "0.9": 19125.8
  },
  "hotspots": [
   {
+   "lat": 61.49,
+   "lon": 10.77,
+   "p_cell": 0.0017630228520841072,
+   "p_within_1.5km": 0.016187385475914164,
+   "scenario_p_cell_ratio": {
+    "base": 1.08,
+    "elevation_literal": 2.13,
+    "elevation_not_elevation": 0.17,
+    "monday_pickup": 0.59,
+    "sunday_pickup": 1.22,
+    "no_organizer_prior": 0.97,
+    "no_se_approach": 0.97,
+    "aircraft_strong": 1.29,
+    "aircraft_weak": 0.47,
+    "no_defaultno": 0.75,
+    "forest_strong": 1.06
+   },
+   "fragility": 0.63
+  },
+  {
    "lat": 61.245,
    "lon": 10.870000000000001,
-   "p_cell": 0.0017012792226031518,
-   "p_within_1.5km": 0.011840284964265837,
+   "p_cell": 0.0017147357470420285,
+   "p_within_1.5km": 0.011946495895811588,
    "scenario_p_cell_ratio": {
     "base": 1.02,
-    "elevation_literal": 2.1,
+    "elevation_literal": 2.01,
     "elevation_not_elevation": 0.16,
-    "monday_pickup": 0.93,
-    "sunday_pickup": 1.05,
-    "no_organizer_prior": 0.91,
+    "monday_pickup": 1.08,
+    "sunday_pickup": 1.01,
+    "no_organizer_prior": 0.92,
     "no_se_approach": 0.91,
-    "aircraft_strong": 1.23,
-    "aircraft_weak": 0.42,
+    "aircraft_strong": 1.22,
+    "aircraft_weak": 0.43,
     "no_defaultno": 1.22,
-    "forest_strong": 0.83
+    "forest_strong": 0.82
    },
-   "fragility": 0.64
+   "fragility": 0.63
   },
   {
    "lat": 61.315,
    "lon": 10.969999999999999,
-   "p_cell": 0.0017000211836788574,
-   "p_within_1.5km": 0.011377381724419197,
+   "p_cell": 0.0017057643685055527,
+   "p_within_1.5km": 0.011430929225754576,
    "scenario_p_cell_ratio": {
-    "base": 0.99,
-    "elevation_literal": 2.04,
-    "elevation_not_elevation": 0.15,
-    "monday_pickup": 0.54,
-    "sunday_pickup": 1.14,
-    "no_organizer_prior": 0.88,
-    "no_se_approach": 0.88,
+    "base": 1.0,
+    "elevation_literal": 1.97,
+    "elevation_not_elevation": 0.16,
+    "monday_pickup": 0.63,
+    "sunday_pickup": 1.1,
+    "no_organizer_prior": 0.9,
+    "no_se_approach": 0.89,
     "aircraft_strong": 1.2,
-    "aircraft_weak": 0.4,
-    "no_defaultno": 1.68,
+    "aircraft_weak": 0.41,
+    "no_defaultno": 1.69,
     "forest_strong": 0.98
    },
-   "fragility": 0.69
-  },
-  {
-   "lat": 61.14,
-   "lon": 10.86,
-   "p_cell": 0.0016389423980914472,
-   "p_within_1.5km": 0.01396780726263855,
-   "scenario_p_cell_ratio": {
-    "base": 0.98,
-    "elevation_literal": 1.98,
-    "elevation_not_elevation": 0.19,
-    "monday_pickup": 1.22,
-    "sunday_pickup": 0.91,
-    "no_organizer_prior": 0.88,
-    "no_se_approach": 0.88,
-    "aircraft_strong": 1.18,
-    "aircraft_weak": 0.42,
-    "no_defaultno": 1.18,
-    "forest_strong": 1.15
-   },
-   "fragility": 0.6
+   "fragility": 0.66
   },
   {
    "lat": 61.335,
    "lon": 10.95,
-   "p_cell": 0.0016288093165673285,
-   "p_within_1.5km": 0.008684423008554614,
+   "p_cell": 0.001633523394534406,
+   "p_within_1.5km": 0.008726831250383073,
    "scenario_p_cell_ratio": {
-    "base": 1.04,
-    "elevation_literal": 2.14,
-    "elevation_not_elevation": 0.16,
-    "monday_pickup": 0.55,
-    "sunday_pickup": 1.2,
-    "no_organizer_prior": 0.93,
-    "no_se_approach": 0.93,
+    "base": 1.05,
+    "elevation_literal": 2.07,
+    "elevation_not_elevation": 0.17,
+    "monday_pickup": 0.64,
+    "sunday_pickup": 1.16,
+    "no_organizer_prior": 0.94,
+    "no_se_approach": 0.94,
     "aircraft_strong": 1.26,
-    "aircraft_weak": 0.42,
-    "no_defaultno": 1.24,
+    "aircraft_weak": 0.43,
+    "no_defaultno": 1.25,
     "forest_strong": 0.84
    },
-   "fragility": 0.66
+   "fragility": 0.63
   },
   {
    "lat": 61.34,
    "lon": 11.09,
-   "p_cell": 0.0015822222316446745,
-   "p_within_1.5km": 0.007075220571281438,
+   "p_cell": 0.0016175415119439925,
+   "p_within_1.5km": 0.007241447492421292,
    "scenario_p_cell_ratio": {
     "base": 1.06,
-    "elevation_literal": 2.16,
-    "elevation_not_elevation": 0.18,
-    "monday_pickup": 0.75,
-    "sunday_pickup": 1.16,
-    "no_organizer_prior": 0.95,
-    "no_se_approach": 0.95,
-    "aircraft_strong": 1.29,
-    "aircraft_weak": 0.43,
-    "no_defaultno": 0.89,
-    "forest_strong": 0.86
-   },
-   "fragility": 0.61
-  },
-  {
-   "lat": 61.38,
-   "lon": 10.9,
-   "p_cell": 0.0015422849995131772,
-   "p_within_1.5km": 0.012728606732929037,
-   "scenario_p_cell_ratio": {
-    "base": 1.02,
-    "elevation_literal": 2.11,
-    "elevation_not_elevation": 0.16,
-    "monday_pickup": 0.5,
-    "sunday_pickup": 1.2,
-    "no_organizer_prior": 0.91,
-    "no_se_approach": 0.92,
-    "aircraft_strong": 1.25,
-    "aircraft_weak": 0.41,
-    "no_defaultno": 1.23,
-    "forest_strong": 1.13
-   },
-   "fragility": 0.67
-  },
-  {
-   "lat": 61.21,
-   "lon": 10.93,
-   "p_cell": 0.0015268901673407328,
-   "p_within_1.5km": 0.008730289163642338,
-   "scenario_p_cell_ratio": {
-    "base": 1.01,
     "elevation_literal": 2.08,
-    "elevation_not_elevation": 0.15,
-    "monday_pickup": 1.11,
-    "sunday_pickup": 0.98,
-    "no_organizer_prior": 0.9,
-    "no_se_approach": 0.9,
-    "aircraft_strong": 1.22,
-    "aircraft_weak": 0.42,
-    "no_defaultno": 1.21,
-    "forest_strong": 0.82
-   },
-   "fragility": 0.65
-  },
-  {
-   "lat": 61.275,
-   "lon": 11.18,
-   "p_cell": 0.0013873694142798303,
-   "p_within_1.5km": 0.008047150160786328,
-   "scenario_p_cell_ratio": {
-    "base": 1.01,
-    "elevation_literal": 2.09,
-    "elevation_not_elevation": 0.15,
-    "monday_pickup": 0.84,
-    "sunday_pickup": 1.07,
-    "no_organizer_prior": 0.91,
-    "no_se_approach": 0.91,
-    "aircraft_strong": 1.19,
-    "aircraft_weak": 0.47,
-    "no_defaultno": 1.21,
-    "forest_strong": 0.98
-   },
-   "fragility": 0.64
-  },
-  {
-   "lat": 61.16,
-   "lon": 10.98,
-   "p_cell": 0.0012038315486607096,
-   "p_within_1.5km": 0.00607549310935881,
-   "scenario_p_cell_ratio": {
-    "base": 1.0,
-    "elevation_literal": 2.02,
-    "elevation_not_elevation": 0.18,
-    "monday_pickup": 1.31,
-    "sunday_pickup": 0.9,
-    "no_organizer_prior": 0.89,
-    "no_se_approach": 0.89,
-    "aircraft_strong": 1.21,
-    "aircraft_weak": 0.41,
-    "no_defaultno": 1.2,
-    "forest_strong": 0.81
-   },
-   "fragility": 0.61
-  },
-  {
-   "lat": 61.42,
-   "lon": 10.98,
-   "p_cell": 0.0011995354033759117,
-   "p_within_1.5km": 0.004432884449113052,
-   "scenario_p_cell_ratio": {
-    "base": 1.07,
-    "elevation_literal": 2.19,
-    "elevation_not_elevation": 0.17,
-    "monday_pickup": 0.59,
-    "sunday_pickup": 1.23,
-    "no_organizer_prior": 0.95,
+    "elevation_not_elevation": 0.19,
+    "monday_pickup": 0.87,
+    "sunday_pickup": 1.12,
+    "no_organizer_prior": 0.96,
     "no_se_approach": 0.95,
-    "aircraft_strong": 1.29,
+    "aircraft_strong": 1.28,
     "aircraft_weak": 0.44,
     "no_defaultno": 0.9,
-    "forest_strong": 0.87
-   },
-   "fragility": 0.63
-  },
-  {
-   "lat": 61.375,
-   "lon": 10.98,
-   "p_cell": 0.001168514735649129,
-   "p_within_1.5km": 0.007718426465265922,
-   "scenario_p_cell_ratio": {
-    "base": 1.07,
-    "elevation_literal": 2.17,
-    "elevation_not_elevation": 0.19,
-    "monday_pickup": 0.59,
-    "sunday_pickup": 1.23,
-    "no_organizer_prior": 0.95,
-    "no_se_approach": 0.95,
-    "aircraft_strong": 1.3,
-    "aircraft_weak": 0.43,
-    "no_defaultno": 0.9,
-    "forest_strong": 0.87
-   },
-   "fragility": 0.61
-  },
-  {
-   "lat": 61.295,
-   "lon": 10.81,
-   "p_cell": 0.0010520857301696228,
-   "p_within_1.5km": 0.014165464168127324,
-   "scenario_p_cell_ratio": {
-    "base": 0.97,
-    "elevation_literal": 2.01,
-    "elevation_not_elevation": 0.15,
-    "monday_pickup": 0.85,
-    "sunday_pickup": 1.02,
-    "no_organizer_prior": 0.87,
-    "no_se_approach": 0.87,
-    "aircraft_strong": 1.16,
-    "aircraft_weak": 0.42,
-    "no_defaultno": 1.65,
-    "forest_strong": 0.97
-   },
-   "fragility": 0.66
-  },
-  {
-   "lat": 61.135,
-   "lon": 10.9,
-   "p_cell": 0.0010180919180461051,
-   "p_within_1.5km": 0.00791062857955509,
-   "scenario_p_cell_ratio": {
-    "base": 1.0,
-    "elevation_literal": 2.0,
-    "elevation_not_elevation": 0.2,
-    "monday_pickup": 1.34,
-    "sunday_pickup": 0.89,
-    "no_organizer_prior": 0.89,
-    "no_se_approach": 0.89,
-    "aircraft_strong": 1.2,
-    "aircraft_weak": 0.41,
-    "no_defaultno": 1.2,
-    "forest_strong": 0.81
+    "forest_strong": 0.85
    },
    "fragility": 0.59
   },
   {
-   "lat": 61.225,
-   "lon": 10.89,
-   "p_cell": 0.000930573554055101,
-   "p_within_1.5km": 0.004795324882238385,
+   "lat": 61.38,
+   "lon": 10.9,
+   "p_cell": 0.0015471479216208805,
+   "p_within_1.5km": 0.01281190794102358,
    "scenario_p_cell_ratio": {
-    "base": 0.98,
-    "elevation_literal": 2.0,
-    "elevation_not_elevation": 0.17,
-    "monday_pickup": 0.99,
-    "sunday_pickup": 0.98,
-    "no_organizer_prior": 0.88,
-    "no_se_approach": 1.3,
-    "aircraft_strong": 1.19,
-    "aircraft_weak": 0.41,
-    "no_defaultno": 1.18,
-    "forest_strong": 0.8
-   },
-   "fragility": 0.63
-  },
-  {
-   "lat": 61.35,
-   "lon": 10.98,
-   "p_cell": 0.0008740012817187773,
-   "p_within_1.5km": 0.006228396659909793,
-   "scenario_p_cell_ratio": {
-    "base": 1.04,
-    "elevation_literal": 2.11,
-    "elevation_not_elevation": 0.18,
+    "base": 1.03,
+    "elevation_literal": 2.04,
+    "elevation_not_elevation": 0.16,
     "monday_pickup": 0.58,
-    "sunday_pickup": 1.19,
+    "sunday_pickup": 1.16,
     "no_organizer_prior": 0.93,
-    "no_se_approach": 0.93,
-    "aircraft_strong": 1.26,
+    "no_se_approach": 0.92,
+    "aircraft_strong": 1.24,
     "aircraft_weak": 0.42,
     "no_defaultno": 1.24,
-    "forest_strong": 0.84
-   },
-   "fragility": 0.63
-  },
-  {
-   "lat": 61.38,
-   "lon": 10.940000000000001,
-   "p_cell": 0.000870401316074397,
-   "p_within_1.5km": 0.0072010378153529895,
-   "scenario_p_cell_ratio": {
-    "base": 1.04,
-    "elevation_literal": 2.13,
-    "elevation_not_elevation": 0.17,
-    "monday_pickup": 0.54,
-    "sunday_pickup": 1.21,
-    "no_organizer_prior": 0.93,
-    "no_se_approach": 0.93,
-    "aircraft_strong": 1.27,
-    "aircraft_weak": 0.42,
-    "no_defaultno": 1.25,
-    "forest_strong": 0.84
+    "forest_strong": 1.12
    },
    "fragility": 0.65
   },
   {
-   "lat": 61.16,
-   "lon": 10.870000000000001,
-   "p_cell": 0.0008534792701577358,
-   "p_within_1.5km": 0.008526653139901405,
+   "lat": 61.21,
+   "lon": 10.93,
+   "p_cell": 0.0015207173628705804,
+   "p_within_1.5km": 0.008686390239676907,
    "scenario_p_cell_ratio": {
-    "base": 1.0,
-    "elevation_literal": 2.04,
-    "elevation_not_elevation": 0.17,
-    "monday_pickup": 1.31,
-    "sunday_pickup": 0.9,
-    "no_organizer_prior": 0.89,
-    "no_se_approach": 0.89,
-    "aircraft_strong": 1.2,
-    "aircraft_weak": 0.42,
-    "no_defaultno": 1.2,
-    "forest_strong": 0.81
-   },
-   "fragility": 0.63
-  },
-  {
-   "lat": 61.41,
-   "lon": 10.879999999999999,
-   "p_cell": 0.0008457519337097824,
-   "p_within_1.5km": 0.005130428518801058,
-   "scenario_p_cell_ratio": {
-    "base": 1.04,
-    "elevation_literal": 2.15,
+    "base": 1.01,
+    "elevation_literal": 1.99,
     "elevation_not_elevation": 0.16,
-    "monday_pickup": 0.5,
-    "sunday_pickup": 1.22,
-    "no_organizer_prior": 0.93,
-    "no_se_approach": 0.93,
-    "aircraft_strong": 1.26,
-    "aircraft_weak": 0.42,
-    "no_defaultno": 1.25,
-    "forest_strong": 0.84
-   },
-   "fragility": 0.67
-  },
-  {
-   "lat": 61.19,
-   "lon": 10.81,
-   "p_cell": 0.0008163850045635053,
-   "p_within_1.5km": 0.005572098758838127,
-   "scenario_p_cell_ratio": {
-    "base": 1.0,
-    "elevation_literal": 2.06,
-    "elevation_not_elevation": 0.16,
-    "monday_pickup": 1.21,
+    "monday_pickup": 1.28,
     "sunday_pickup": 0.94,
-    "no_organizer_prior": 0.9,
+    "no_organizer_prior": 0.91,
     "no_se_approach": 0.9,
-    "aircraft_strong": 1.18,
-    "aircraft_weak": 0.46,
-    "no_defaultno": 1.2,
+    "aircraft_strong": 1.21,
+    "aircraft_weak": 0.43,
+    "no_defaultno": 1.21,
     "forest_strong": 0.81
    },
-   "fragility": 0.63
+   "fragility": 0.64
   },
   {
    "lat": 61.425,
-   "lon": 10.83,
-   "p_cell": 0.0008142895796261693,
-   "p_within_1.5km": 0.004487920847926969,
+   "lon": 10.969999999999999,
+   "p_cell": 0.0013910140208017985,
+   "p_within_1.5km": 0.005420687700292886,
    "scenario_p_cell_ratio": {
-    "base": 0.99,
-    "elevation_literal": 2.03,
-    "elevation_not_elevation": 0.16,
-    "monday_pickup": 0.45,
-    "sunday_pickup": 1.17,
-    "no_organizer_prior": 0.89,
-    "no_se_approach": 0.89,
-    "aircraft_strong": 1.19,
-    "aircraft_weak": 0.42,
-    "no_defaultno": 1.68,
-    "forest_strong": 1.03
+    "base": 1.07,
+    "elevation_literal": 2.12,
+    "elevation_not_elevation": 0.17,
+    "monday_pickup": 0.68,
+    "sunday_pickup": 1.19,
+    "no_organizer_prior": 0.97,
+    "no_se_approach": 0.96,
+    "aircraft_strong": 1.3,
+    "aircraft_weak": 0.44,
+    "no_defaultno": 0.91,
+    "forest_strong": 0.86
    },
-   "fragility": 0.69
+   "fragility": 0.62
+  },
+  {
+   "lat": 61.275,
+   "lon": 11.18,
+   "p_cell": 0.0013907055811682829,
+   "p_within_1.5km": 0.008083556367275663,
+   "scenario_p_cell_ratio": {
+    "base": 1.02,
+    "elevation_literal": 2.01,
+    "elevation_not_elevation": 0.16,
+    "monday_pickup": 0.97,
+    "sunday_pickup": 1.03,
+    "no_organizer_prior": 0.91,
+    "no_se_approach": 0.91,
+    "aircraft_strong": 1.18,
+    "aircraft_weak": 0.48,
+    "no_defaultno": 1.22,
+    "forest_strong": 0.96
+   },
+   "fragility": 0.62
+  },
+  {
+   "lat": 61.54,
+   "lon": 10.879999999999999,
+   "p_cell": 0.0013685892166869855,
+   "p_within_1.5km": 0.006231375429474923,
+   "scenario_p_cell_ratio": {
+    "base": 1.03,
+    "elevation_literal": 2.01,
+    "elevation_not_elevation": 0.18,
+    "monday_pickup": 0.56,
+    "sunday_pickup": 1.16,
+    "no_organizer_prior": 0.92,
+    "no_se_approach": 0.92,
+    "aircraft_strong": 1.23,
+    "aircraft_weak": 0.43,
+    "no_defaultno": 1.23,
+    "forest_strong": 1.24
+   },
+   "fragility": 0.63
   },
   {
    "lat": 61.45,
    "lon": 10.870000000000001,
-   "p_cell": 0.0007757032533263613,
-   "p_within_1.5km": 0.0033397071729019874,
+   "p_cell": 0.0013562771590165932,
+   "p_within_1.5km": 0.006079705353479972,
    "scenario_p_cell_ratio": {
-    "base": 1.08,
-    "elevation_literal": 2.19,
-    "elevation_not_elevation": 0.2,
-    "monday_pickup": 0.53,
-    "sunday_pickup": 1.27,
-    "no_organizer_prior": 0.97,
-    "no_se_approach": 0.97,
-    "aircraft_strong": 1.28,
-    "aircraft_weak": 0.48,
-    "no_defaultno": 0.75,
-    "forest_strong": 0.88
+    "base": 1.09,
+    "elevation_literal": 2.11,
+    "elevation_not_elevation": 0.21,
+    "monday_pickup": 0.62,
+    "sunday_pickup": 1.22,
+    "no_organizer_prior": 0.98,
+    "no_se_approach": 0.98,
+    "aircraft_strong": 1.32,
+    "aircraft_weak": 0.45,
+    "no_defaultno": 0.76,
+    "forest_strong": 0.87
    },
-   "fragility": 0.6
+   "fragility": 0.58
   },
   {
-   "lat": 61.3,
-   "lon": 11.0,
-   "p_cell": 0.0007727029057994914,
-   "p_within_1.5km": 0.007677301951226029,
+   "lat": 61.375,
+   "lon": 10.98,
+   "p_cell": 0.0011757752500385402,
+   "p_within_1.5km": 0.007779222579870541,
    "scenario_p_cell_ratio": {
-    "base": 0.95,
+    "base": 1.07,
+    "elevation_literal": 2.09,
+    "elevation_not_elevation": 0.2,
+    "monday_pickup": 0.69,
+    "sunday_pickup": 1.18,
+    "no_organizer_prior": 0.97,
+    "no_se_approach": 0.96,
+    "aircraft_strong": 1.3,
+    "aircraft_weak": 0.44,
+    "no_defaultno": 0.91,
+    "forest_strong": 0.86
+   },
+   "fragility": 0.58
+  },
+  {
+   "lat": 61.295,
+   "lon": 10.81,
+   "p_cell": 0.0010600212499826572,
+   "p_within_1.5km": 0.014274862960343,
+   "scenario_p_cell_ratio": {
+    "base": 0.98,
+    "elevation_literal": 1.93,
+    "elevation_not_elevation": 0.15,
+    "monday_pickup": 0.98,
+    "sunday_pickup": 0.98,
+    "no_organizer_prior": 0.88,
+    "no_se_approach": 0.87,
+    "aircraft_strong": 1.15,
+    "aircraft_weak": 0.43,
+    "no_defaultno": 1.66,
+    "forest_strong": 0.96
+   },
+   "fragility": 0.66
+  },
+  {
+   "lat": 61.51,
+   "lon": 10.969999999999999,
+   "p_cell": 0.0010330594828750952,
+   "p_within_1.5km": 0.003557376183209888,
+   "scenario_p_cell_ratio": {
+    "base": 1.03,
+    "elevation_literal": 2.01,
+    "elevation_not_elevation": 0.19,
+    "monday_pickup": 0.57,
+    "sunday_pickup": 1.17,
+    "no_organizer_prior": 0.93,
+    "no_se_approach": 0.93,
+    "aircraft_strong": 1.25,
+    "aircraft_weak": 0.42,
+    "no_defaultno": 1.24,
+    "forest_strong": 1.11
+   },
+   "fragility": 0.61
+  },
+  {
+   "lat": 61.425,
+   "lon": 10.83,
+   "p_cell": 0.0010067601358892786,
+   "p_within_1.5km": 0.005722025071165753,
+   "scenario_p_cell_ratio": {
+    "base": 1.0,
+    "elevation_literal": 1.96,
+    "elevation_not_elevation": 0.17,
+    "monday_pickup": 0.53,
+    "sunday_pickup": 1.13,
+    "no_organizer_prior": 0.9,
+    "no_se_approach": 0.89,
+    "aircraft_strong": 1.2,
+    "aircraft_weak": 0.41,
+    "no_defaultno": 1.7,
+    "forest_strong": 1.02
+   },
+   "fragility": 0.66
+  },
+  {
+   "lat": 61.225,
+   "lon": 10.89,
+   "p_cell": 0.0009379115389182761,
+   "p_within_1.5km": 0.0048472878750575885,
+   "scenario_p_cell_ratio": {
+    "base": 0.98,
     "elevation_literal": 1.91,
+    "elevation_not_elevation": 0.18,
+    "monday_pickup": 1.14,
+    "sunday_pickup": 0.94,
+    "no_organizer_prior": 0.88,
+    "no_se_approach": 1.31,
+    "aircraft_strong": 1.17,
+    "aircraft_weak": 0.42,
+    "no_defaultno": 1.18,
+    "forest_strong": 0.79
+   },
+   "fragility": 0.61
+  },
+  {
+   "lat": 61.54,
+   "lon": 10.92,
+   "p_cell": 0.0009257257992081146,
+   "p_within_1.5km": 0.007944499892673101,
+   "scenario_p_cell_ratio": {
+    "base": 1.03,
+    "elevation_literal": 2.02,
     "elevation_not_elevation": 0.19,
     "monday_pickup": 0.56,
-    "sunday_pickup": 1.09,
-    "no_organizer_prior": 0.85,
-    "no_se_approach": 1.27,
-    "aircraft_strong": 1.16,
-    "aircraft_weak": 0.39,
-    "no_defaultno": 1.62,
-    "forest_strong": 1.02
+    "sunday_pickup": 1.17,
+    "no_organizer_prior": 0.93,
+    "no_se_approach": 0.93,
+    "aircraft_strong": 1.24,
+    "aircraft_weak": 0.43,
+    "no_defaultno": 1.24,
+    "forest_strong": 1.11
+   },
+   "fragility": 0.61
+  },
+  {
+   "lat": 61.155,
+   "lon": 10.86,
+   "p_cell": 0.0009118363379799053,
+   "p_within_1.5km": 0.006654471972545031,
+   "scenario_p_cell_ratio": {
+    "base": 0.98,
+    "elevation_literal": 1.88,
+    "elevation_not_elevation": 0.2,
+    "monday_pickup": 1.44,
+    "sunday_pickup": 0.85,
+    "no_organizer_prior": 0.88,
+    "no_se_approach": 0.88,
+    "aircraft_strong": 1.13,
+    "aircraft_weak": 0.47,
+    "no_defaultno": 1.17,
+    "forest_strong": 1.13
+   },
+   "fragility": 0.57
+  },
+  {
+   "lat": 61.41,
+   "lon": 10.879999999999999,
+   "p_cell": 0.0008952486466094275,
+   "p_within_1.5km": 0.005366119594896591,
+   "scenario_p_cell_ratio": {
+    "base": 1.05,
+    "elevation_literal": 2.07,
+    "elevation_not_elevation": 0.17,
+    "monday_pickup": 0.58,
+    "sunday_pickup": 1.18,
+    "no_organizer_prior": 0.94,
+    "no_se_approach": 0.94,
+    "aircraft_strong": 1.26,
+    "aircraft_weak": 0.43,
+    "no_defaultno": 1.26,
+    "forest_strong": 0.84
    },
    "fragility": 0.64
   },
   {
-   "lat": 61.305,
-   "lon": 11.14,
-   "p_cell": 0.0007430921647934495,
-   "p_within_1.5km": 0.0017414215608765806,
+   "lat": 61.35,
+   "lon": 10.98,
+   "p_cell": 0.0008772497043367011,
+   "p_within_1.5km": 0.00626246763615531,
    "scenario_p_cell_ratio": {
-    "base": 0.99,
-    "elevation_literal": 1.98,
-    "elevation_not_elevation": 0.2,
-    "monday_pickup": 0.75,
-    "sunday_pickup": 1.07,
-    "no_organizer_prior": 0.88,
-    "no_se_approach": 0.89,
-    "aircraft_strong": 1.19,
-    "aircraft_weak": 0.42,
-    "no_defaultno": 1.68,
-    "forest_strong": 0.8
+    "base": 1.04,
+    "elevation_literal": 2.03,
+    "elevation_not_elevation": 0.19,
+    "monday_pickup": 0.67,
+    "sunday_pickup": 1.15,
+    "no_organizer_prior": 0.94,
+    "no_se_approach": 0.94,
+    "aircraft_strong": 1.26,
+    "aircraft_weak": 0.43,
+    "no_defaultno": 1.25,
+    "forest_strong": 0.83
    },
    "fragility": 0.6
   },
   {
-   "lat": 61.16,
-   "lon": 10.79,
-   "p_cell": 0.000732323661603052,
-   "p_within_1.5km": 0.005830895035598585,
+   "lat": 61.38,
+   "lon": 10.940000000000001,
+   "p_cell": 0.0008740792967770209,
+   "p_within_1.5km": 0.007259996807018935,
    "scenario_p_cell_ratio": {
-    "base": 0.99,
+    "base": 1.05,
     "elevation_literal": 2.05,
-    "elevation_not_elevation": 0.15,
-    "monday_pickup": 1.12,
-    "sunday_pickup": 0.95,
-    "no_organizer_prior": 0.89,
-    "no_se_approach": 0.89,
-    "aircraft_strong": 1.13,
-    "aircraft_weak": 0.5,
-    "no_defaultno": 1.19,
-    "forest_strong": 1.03
-   },
-   "fragility": 0.63
-  },
-  {
-   "lat": 61.425,
-   "lon": 10.91,
-   "p_cell": 0.0007236302782468715,
-   "p_within_1.5km": 0.002257884254353815,
-   "scenario_p_cell_ratio": {
-    "base": 1.02,
-    "elevation_literal": 2.08,
-    "elevation_not_elevation": 0.19,
-    "monday_pickup": 0.52,
-    "sunday_pickup": 1.2,
-    "no_organizer_prior": 0.92,
-    "no_se_approach": 0.92,
-    "aircraft_strong": 1.24,
-    "aircraft_weak": 0.42,
-    "no_defaultno": 1.23,
-    "forest_strong": 1.08
+    "elevation_not_elevation": 0.18,
+    "monday_pickup": 0.63,
+    "sunday_pickup": 1.17,
+    "no_organizer_prior": 0.94,
+    "no_se_approach": 0.94,
+    "aircraft_strong": 1.26,
+    "aircraft_weak": 0.43,
+    "no_defaultno": 1.26,
+    "forest_strong": 0.84
    },
    "fragility": 0.62
   },
   {
-   "lat": 61.18,
-   "lon": 10.969999999999999,
-   "p_cell": 0.0007097584136949741,
-   "p_within_1.5km": 0.00405296714378897,
+   "lat": 61.425,
+   "lon": 10.91,
+   "p_cell": 0.0008421530759067662,
+   "p_within_1.5km": 0.002705119951236797,
    "scenario_p_cell_ratio": {
-    "base": 0.97,
-    "elevation_literal": 1.95,
-    "elevation_not_elevation": 0.19,
-    "monday_pickup": 1.2,
-    "sunday_pickup": 0.9,
-    "no_organizer_prior": 0.87,
-    "no_se_approach": 1.29,
-    "aircraft_strong": 1.17,
+    "base": 1.03,
+    "elevation_literal": 2.0,
+    "elevation_not_elevation": 0.2,
+    "monday_pickup": 0.61,
+    "sunday_pickup": 1.15,
+    "no_organizer_prior": 0.93,
+    "no_se_approach": 0.93,
+    "aircraft_strong": 1.25,
+    "aircraft_weak": 0.42,
+    "no_defaultno": 1.24,
+    "forest_strong": 1.08
+   },
+   "fragility": 0.6
+  },
+  {
+   "lat": 61.595,
+   "lon": 10.8,
+   "p_cell": 0.0007945913961187337,
+   "p_within_1.5km": 0.004870922692988502,
+   "scenario_p_cell_ratio": {
+    "base": 1.01,
+    "elevation_literal": 2.0,
+    "elevation_not_elevation": 0.16,
+    "monday_pickup": 0.54,
+    "sunday_pickup": 1.15,
+    "no_organizer_prior": 0.91,
+    "no_se_approach": 0.91,
+    "aircraft_strong": 1.11,
+    "aircraft_weak": 0.59,
+    "no_defaultno": 1.22,
+    "forest_strong": 1.36
+   },
+   "fragility": 0.63
+  },
+  {
+   "lat": 61.3,
+   "lon": 11.0,
+   "p_cell": 0.0007761987114409506,
+   "p_within_1.5km": 0.007722044720253527,
+   "scenario_p_cell_ratio": {
+    "base": 0.96,
+    "elevation_literal": 1.84,
+    "elevation_not_elevation": 0.2,
+    "monday_pickup": 0.65,
+    "sunday_pickup": 1.05,
+    "no_organizer_prior": 0.86,
+    "no_se_approach": 1.27,
+    "aircraft_strong": 1.15,
     "aircraft_weak": 0.4,
-    "no_defaultno": 1.17,
+    "no_defaultno": 1.63,
+    "forest_strong": 1.01
+   },
+   "fragility": 0.61
+  },
+  {
+   "lat": 61.54,
+   "lon": 10.83,
+   "p_cell": 0.00076181740654226,
+   "p_within_1.5km": 0.007586502256339412,
+   "scenario_p_cell_ratio": {
+    "base": 1.03,
+    "elevation_literal": 2.01,
+    "elevation_not_elevation": 0.19,
+    "monday_pickup": 0.56,
+    "sunday_pickup": 1.17,
+    "no_organizer_prior": 0.93,
+    "no_se_approach": 0.93,
+    "aircraft_strong": 1.23,
+    "aircraft_weak": 0.44,
+    "no_defaultno": 1.24,
+    "forest_strong": 1.11
+   },
+   "fragility": 0.61
+  },
+  {
+   "lat": 61.305,
+   "lon": 11.14,
+   "p_cell": 0.0007508738810948749,
+   "p_within_1.5km": 0.0017741236747089975,
+   "scenario_p_cell_ratio": {
+    "base": 0.99,
+    "elevation_literal": 1.9,
+    "elevation_not_elevation": 0.21,
+    "monday_pickup": 0.87,
+    "sunday_pickup": 1.03,
+    "no_organizer_prior": 0.89,
+    "no_se_approach": 0.89,
+    "aircraft_strong": 1.18,
+    "aircraft_weak": 0.43,
+    "no_defaultno": 1.69,
+    "forest_strong": 0.79
+   },
+   "fragility": 0.58
+  },
+  {
+   "lat": 61.495,
+   "lon": 10.91,
+   "p_cell": 0.0007181675212039944,
+   "p_within_1.5km": 0.001893934922736847,
+   "scenario_p_cell_ratio": {
+    "base": 1.03,
+    "elevation_literal": 1.95,
+    "elevation_not_elevation": 0.24,
+    "monday_pickup": 0.57,
+    "sunday_pickup": 1.16,
+    "no_organizer_prior": 0.93,
+    "no_se_approach": 0.92,
+    "aircraft_strong": 1.25,
+    "aircraft_weak": 0.42,
+    "no_defaultno": 1.24,
+    "forest_strong": 1.14
+   },
+   "fragility": 0.56
+  },
+  {
+   "lat": 61.19,
+   "lon": 10.81,
+   "p_cell": 0.0007065432732760159,
+   "p_within_1.5km": 0.004874824341485927,
+   "scenario_p_cell_ratio": {
+    "base": 1.0,
+    "elevation_literal": 1.97,
+    "elevation_not_elevation": 0.16,
+    "monday_pickup": 1.4,
+    "sunday_pickup": 0.89,
+    "no_organizer_prior": 0.9,
+    "no_se_approach": 0.9,
+    "aircraft_strong": 1.16,
+    "aircraft_weak": 0.48,
+    "no_defaultno": 1.2,
+    "forest_strong": 0.8
+   },
+   "fragility": 0.63
+  },
+  {
+   "lat": 61.16,
+   "lon": 10.98,
+   "p_cell": 0.000702729761067737,
+   "p_within_1.5km": 0.003652811246758434,
+   "scenario_p_cell_ratio": {
+    "base": 0.99,
+    "elevation_literal": 1.93,
+    "elevation_not_elevation": 0.19,
+    "monday_pickup": 1.51,
+    "sunday_pickup": 0.86,
+    "no_organizer_prior": 0.89,
+    "no_se_approach": 0.89,
+    "aircraft_strong": 1.16,
+    "aircraft_weak": 0.46,
+    "no_defaultno": 1.19,
+    "forest_strong": 0.79
+   },
+   "fragility": 0.59
+  },
+  {
+   "lat": 61.295,
+   "lon": 11.18,
+   "p_cell": 0.000648494910851847,
+   "p_within_1.5km": 0.0045862067157922135,
+   "scenario_p_cell_ratio": {
+    "base": 0.99,
+    "elevation_literal": 1.93,
+    "elevation_not_elevation": 0.18,
+    "monday_pickup": 0.95,
+    "sunday_pickup": 1.01,
+    "no_organizer_prior": 0.89,
+    "no_se_approach": 1.32,
+    "aircraft_strong": 1.16,
+    "aircraft_weak": 0.46,
+    "no_defaultno": 1.19,
     "forest_strong": 0.79
    },
    "fragility": 0.6
   },
   {
-   "lat": 61.295,
-   "lon": 11.18,
-   "p_cell": 0.0006483745429188065,
-   "p_within_1.5km": 0.004567836525195838,
-   "scenario_p_cell_ratio": {
-    "base": 0.99,
-    "elevation_literal": 2.01,
-    "elevation_not_elevation": 0.17,
-    "monday_pickup": 0.82,
-    "sunday_pickup": 1.05,
-    "no_organizer_prior": 0.88,
-    "no_se_approach": 1.31,
-    "aircraft_strong": 1.17,
-    "aircraft_weak": 0.45,
-    "no_defaultno": 1.19,
-    "forest_strong": 0.8
-   },
-   "fragility": 0.62
-  },
-  {
    "lat": 61.275,
    "lon": 10.84,
-   "p_cell": 0.0006425372851097075,
-   "p_within_1.5km": 0.005063490571441853,
+   "p_cell": 0.0006475713327529705,
+   "p_within_1.5km": 0.005111824803716167,
    "scenario_p_cell_ratio": {
-    "base": 0.95,
-    "elevation_literal": 1.96,
+    "base": 0.96,
+    "elevation_literal": 1.88,
     "elevation_not_elevation": 0.15,
-    "monday_pickup": 0.83,
-    "sunday_pickup": 0.99,
-    "no_organizer_prior": 0.85,
-    "no_se_approach": 1.26,
+    "monday_pickup": 0.97,
+    "sunday_pickup": 0.95,
+    "no_organizer_prior": 0.86,
+    "no_se_approach": 1.27,
     "aircraft_strong": 1.14,
-    "aircraft_weak": 0.4,
+    "aircraft_weak": 0.41,
     "no_defaultno": 1.62,
-    "forest_strong": 0.77
+    "forest_strong": 0.76
    },
    "fragility": 0.67
   },
   {
-   "lat": 61.315,
-   "lon": 10.77,
-   "p_cell": 0.0006191616927682491,
-   "p_within_1.5km": 0.005005717354530612,
-   "scenario_p_cell_ratio": {
-    "base": 0.97,
-    "elevation_literal": 2.0,
-    "elevation_not_elevation": 0.15,
-    "monday_pickup": 0.74,
-    "sunday_pickup": 1.06,
-    "no_organizer_prior": 0.87,
-    "no_se_approach": 0.87,
-    "aircraft_strong": 1.13,
-    "aircraft_weak": 0.46,
-    "no_defaultno": 1.65,
-    "forest_strong": 1.03
-   },
-   "fragility": 0.66
-  },
-  {
    "lat": 61.75,
    "lon": 10.879999999999999,
-   "p_cell": 0.0006011176274515111,
-   "p_within_1.5km": 0.002600645263913434,
+   "p_cell": 0.0006309046922392666,
+   "p_within_1.5km": 0.0027319591039337387,
+   "scenario_p_cell_ratio": {
+    "base": 1.09,
+    "elevation_literal": 2.11,
+    "elevation_not_elevation": 0.2,
+    "monday_pickup": 0.5,
+    "sunday_pickup": 1.25,
+    "no_organizer_prior": 0.98,
+    "no_se_approach": 0.97,
+    "aircraft_strong": 0.94,
+    "aircraft_weak": 1.0,
+    "no_defaultno": 0.42,
+    "forest_strong": 1.27
+   },
+   "fragility": 0.61
+  },
+  {
+   "lat": 61.315,
+   "lon": 10.77,
+   "p_cell": 0.0006229600713552918,
+   "p_within_1.5km": 0.005042417482443918,
+   "scenario_p_cell_ratio": {
+    "base": 0.98,
+    "elevation_literal": 1.92,
+    "elevation_not_elevation": 0.16,
+    "monday_pickup": 0.86,
+    "sunday_pickup": 1.01,
+    "no_organizer_prior": 0.88,
+    "no_se_approach": 0.88,
+    "aircraft_strong": 1.13,
+    "aircraft_weak": 0.47,
+    "no_defaultno": 1.66,
+    "forest_strong": 1.02
+   },
+   "fragility": 0.63
+  },
+  {
+   "lat": 61.73,
+   "lon": 11.07,
+   "p_cell": 0.0005976684346627037,
+   "p_within_1.5km": 0.0026397423282434446,
    "scenario_p_cell_ratio": {
     "base": 1.08,
-    "elevation_literal": 2.19,
-    "elevation_not_elevation": 0.19,
-    "monday_pickup": 0.43,
-    "sunday_pickup": 1.29,
-    "no_organizer_prior": 0.96,
+    "elevation_literal": 2.07,
+    "elevation_not_elevation": 0.22,
+    "monday_pickup": 0.51,
+    "sunday_pickup": 1.24,
+    "no_organizer_prior": 0.97,
     "no_se_approach": 0.96,
-    "aircraft_strong": 0.9,
-    "aircraft_weak": 1.02,
+    "aircraft_strong": 0.94,
+    "aircraft_weak": 0.97,
     "no_defaultno": 0.41,
-    "forest_strong": 1.28
+    "forest_strong": 1.42
    },
-   "fragility": 0.65
+   "fragility": 0.6
+  },
+  {
+   "lat": 61.18,
+   "lon": 10.969999999999999,
+   "p_cell": 0.0005928618347857257,
+   "p_within_1.5km": 0.0032167062649175056,
+   "scenario_p_cell_ratio": {
+    "base": 0.97,
+    "elevation_literal": 1.86,
+    "elevation_not_elevation": 0.2,
+    "monday_pickup": 1.39,
+    "sunday_pickup": 0.86,
+    "no_organizer_prior": 0.87,
+    "no_se_approach": 1.29,
+    "aircraft_strong": 1.15,
+    "aircraft_weak": 0.42,
+    "no_defaultno": 1.16,
+    "forest_strong": 0.77
+   },
+   "fragility": 0.59
   },
   {
    "lat": 61.335,
    "lon": 11.01,
-   "p_cell": 0.0005889374140939042,
-   "p_within_1.5km": 0.0024688223497002846,
+   "p_cell": 0.0005915788734510924,
+   "p_within_1.5km": 0.0024939893399186022,
    "scenario_p_cell_ratio": {
-    "base": 1.0,
-    "elevation_literal": 2.03,
-    "elevation_not_elevation": 0.18,
-    "monday_pickup": 0.59,
-    "sunday_pickup": 1.14,
-    "no_organizer_prior": 0.9,
-    "no_se_approach": 1.33,
+    "base": 1.01,
+    "elevation_literal": 1.96,
+    "elevation_not_elevation": 0.19,
+    "monday_pickup": 0.69,
+    "sunday_pickup": 1.1,
+    "no_organizer_prior": 0.91,
+    "no_se_approach": 1.34,
     "aircraft_strong": 1.22,
-    "aircraft_weak": 0.4,
-    "no_defaultno": 1.2,
+    "aircraft_weak": 0.41,
+    "no_defaultno": 1.21,
+    "forest_strong": 0.81
+   },
+   "fragility": 0.61
+  },
+  {
+   "lat": 61.755,
+   "lon": 11.06,
+   "p_cell": 0.0005893466387905728,
+   "p_within_1.5km": 0.0030022081366882863,
+   "scenario_p_cell_ratio": {
+    "base": 1.08,
+    "elevation_literal": 2.1,
+    "elevation_not_elevation": 0.21,
+    "monday_pickup": 0.5,
+    "sunday_pickup": 1.25,
+    "no_organizer_prior": 0.97,
+    "no_se_approach": 0.97,
+    "aircraft_strong": 0.94,
+    "aircraft_weak": 0.99,
+    "no_defaultno": 0.42,
+    "forest_strong": 1.34
+   },
+   "fragility": 0.61
+  },
+  {
+   "lat": 61.445,
+   "lon": 10.81,
+   "p_cell": 0.0005477123451414832,
+   "p_within_1.5km": 0.003410897031315932,
+   "scenario_p_cell_ratio": {
+    "base": 1.01,
+    "elevation_literal": 1.97,
+    "elevation_not_elevation": 0.19,
+    "monday_pickup": 0.53,
+    "sunday_pickup": 1.15,
+    "no_organizer_prior": 0.91,
+    "no_se_approach": 0.91,
+    "aircraft_strong": 1.21,
+    "aircraft_weak": 0.42,
+    "no_defaultno": 1.72,
     "forest_strong": 0.81
    },
    "fragility": 0.63
   },
   {
-   "lat": 61.145,
-   "lon": 10.82,
-   "p_cell": 0.000572016925486944,
-   "p_within_1.5km": 0.004973369697190002,
+   "lat": 61.525,
+   "lon": 10.67,
+   "p_cell": 0.0005166118391295934,
+   "p_within_1.5km": 0.0015570452478292501,
    "scenario_p_cell_ratio": {
-    "base": 0.96,
-    "elevation_literal": 1.96,
+    "base": 1.05,
+    "elevation_literal": 2.07,
     "elevation_not_elevation": 0.17,
-    "monday_pickup": 1.09,
-    "sunday_pickup": 0.92,
-    "no_organizer_prior": 0.86,
-    "no_se_approach": 1.28,
-    "aircraft_strong": 1.13,
-    "aircraft_weak": 0.44,
-    "no_defaultno": 1.15,
-    "forest_strong": 1.02
-   },
-   "fragility": 0.62
-  },
-  {
-   "lat": 61.755,
-   "lon": 11.06,
-   "p_cell": 0.0005663493267668221,
-   "p_within_1.5km": 0.00288133424111948,
-   "scenario_p_cell_ratio": {
-    "base": 1.07,
-    "elevation_literal": 2.17,
-    "elevation_not_elevation": 0.2,
-    "monday_pickup": 0.42,
-    "sunday_pickup": 1.29,
-    "no_organizer_prior": 0.96,
-    "no_se_approach": 0.96,
-    "aircraft_strong": 0.9,
-    "aircraft_weak": 1.01,
-    "no_defaultno": 0.41,
-    "forest_strong": 1.34
-   },
-   "fragility": 0.64
-  },
-  {
-   "lat": 61.73,
-   "lon": 11.07,
-   "p_cell": 0.0005623271685595982,
-   "p_within_1.5km": 0.0024648619165949805,
-   "scenario_p_cell_ratio": {
-    "base": 1.07,
-    "elevation_literal": 2.14,
-    "elevation_not_elevation": 0.21,
-    "monday_pickup": 0.43,
-    "sunday_pickup": 1.28,
+    "monday_pickup": 0.53,
+    "sunday_pickup": 1.2,
     "no_organizer_prior": 0.95,
-    "no_se_approach": 0.96,
-    "aircraft_strong": 0.9,
-    "aircraft_weak": 1.01,
-    "no_defaultno": 0.41,
-    "forest_strong": 1.43
-   },
-   "fragility": 0.63
-  },
-  {
-   "lat": 61.115,
-   "lon": 10.9,
-   "p_cell": 0.0005457013482736861,
-   "p_within_1.5km": 0.0038198441223501983,
-   "scenario_p_cell_ratio": {
-    "base": 0.94,
-    "elevation_literal": 1.85,
-    "elevation_not_elevation": 0.2,
-    "monday_pickup": 1.21,
-    "sunday_pickup": 0.85,
-    "no_organizer_prior": 0.84,
-    "no_se_approach": 1.24,
-    "aircraft_strong": 1.13,
-    "aircraft_weak": 0.39,
-    "no_defaultno": 1.59,
-    "forest_strong": 0.76
+    "no_se_approach": 0.94,
+    "aircraft_strong": 1.1,
+    "aircraft_weak": 0.75,
+    "no_defaultno": 0.73,
+    "forest_strong": 1.37
    },
    "fragility": 0.61
   },
   {
-   "lat": 61.225,
-   "lon": 10.780000000000001,
-   "p_cell": 0.0004872258235535999,
-   "p_within_1.5km": 0.0036386132401803567,
-   "scenario_p_cell_ratio": {
-    "base": 1.01,
-    "elevation_literal": 2.07,
-    "elevation_not_elevation": 0.16,
-    "monday_pickup": 1.12,
-    "sunday_pickup": 0.97,
-    "no_organizer_prior": 0.9,
-    "no_se_approach": 0.9,
-    "aircraft_strong": 1.16,
-    "aircraft_weak": 0.49,
-    "no_defaultno": 1.21,
-    "forest_strong": 0.82
-   },
-   "fragility": 0.62
-  },
-  {
-   "lat": 61.12,
-   "lon": 10.86,
-   "p_cell": 0.0004744730797613638,
-   "p_within_1.5km": 0.007646925926106465,
-   "scenario_p_cell_ratio": {
-    "base": 0.97,
-    "elevation_literal": 1.97,
-    "elevation_not_elevation": 0.17,
-    "monday_pickup": 1.15,
-    "sunday_pickup": 0.91,
-    "no_organizer_prior": 0.87,
-    "no_se_approach": 0.87,
-    "aircraft_strong": 1.16,
-    "aircraft_weak": 0.42,
-    "no_defaultno": 1.64,
-    "forest_strong": 0.79
-   },
-   "fragility": 0.64
-  },
-  {
    "lat": 61.73,
    "lon": 10.95,
-   "p_cell": 0.00045179717203573135,
-   "p_within_1.5km": 0.0008587729631945267,
+   "p_cell": 0.0004851615316270083,
+   "p_within_1.5km": 0.000927807577493146,
    "scenario_p_cell_ratio": {
-    "base": 1.08,
-    "elevation_literal": 2.17,
-    "elevation_not_elevation": 0.21,
-    "monday_pickup": 0.44,
-    "sunday_pickup": 1.29,
-    "no_organizer_prior": 0.96,
-    "no_se_approach": 0.97,
-    "aircraft_strong": 0.9,
-    "aircraft_weak": 1.02,
-    "no_defaultno": 0.41,
-    "forest_strong": 1.25
+    "base": 1.09,
+    "elevation_literal": 2.1,
+    "elevation_not_elevation": 0.22,
+    "monday_pickup": 0.51,
+    "sunday_pickup": 1.25,
+    "no_organizer_prior": 0.98,
+    "no_se_approach": 0.98,
+    "aircraft_strong": 0.96,
+    "aircraft_weak": 0.98,
+    "no_defaultno": 0.42,
+    "forest_strong": 1.24
    },
-   "fragility": 0.62
-  },
-  {
-   "lat": 61.275,
-   "lon": 10.8,
-   "p_cell": 0.0004495844941594698,
-   "p_within_1.5km": 0.0069932099440237145,
-   "scenario_p_cell_ratio": {
-    "base": 0.95,
-    "elevation_literal": 1.96,
-    "elevation_not_elevation": 0.15,
-    "monday_pickup": 0.9,
-    "sunday_pickup": 0.97,
-    "no_organizer_prior": 0.85,
-    "no_se_approach": 1.26,
-    "aircraft_strong": 1.12,
-    "aircraft_weak": 0.43,
-    "no_defaultno": 1.61,
-    "forest_strong": 0.77
-   },
-   "fragility": 0.66
-  },
-  {
-   "lat": 61.255,
-   "lon": 11.17,
-   "p_cell": 0.00043824455881286156,
-   "p_within_1.5km": 0.004577939919161986,
-   "scenario_p_cell_ratio": {
-    "base": 1.02,
-    "elevation_literal": 2.05,
-    "elevation_not_elevation": 0.2,
-    "monday_pickup": 0.83,
-    "sunday_pickup": 1.09,
-    "no_organizer_prior": 0.91,
-    "no_se_approach": 0.92,
-    "aircraft_strong": 1.2,
-    "aircraft_weak": 0.47,
-    "no_defaultno": 1.23,
-    "forest_strong": 0.83
-   },
-   "fragility": 0.57
+   "fragility": 0.59
   }
  ]
 }
