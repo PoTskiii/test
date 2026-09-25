@@ -12,4 +12,5 @@ LAYER_MODULES = [
     "hordejakt.layers.exclusions",
     "hordejakt.layers.defaultno_fusion",
     "hordejakt.layers.organizer_prior",
+    "hordejakt.layers.live",
 ]

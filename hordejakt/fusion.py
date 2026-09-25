@@ -10,6 +10,8 @@ from .layers.base import LayerResult
 
 
 def build_layers(grid, cfg, only=None, skip=()):
+    """Build every layer module; cfg['reliability'] = {layer_name: r} overrides
+    reliabilities and cfg['skip_layers'] drops individual layers by name."""
     layers = []
     for mod in LAYER_MODULES:
         short = mod.rsplit(".", 1)[1]
@@ -18,7 +20,20 @@ def build_layers(grid, cfg, only=None, skip=()):
         m = importlib.import_module(mod)
         res = m.build(grid, cfg)
         layers.extend(res if isinstance(res, list) else [res])
-    return layers
+    return apply_overrides(layers, cfg)
+
+
+def apply_overrides(layers, cfg):
+    rel = cfg.get("reliability", {})
+    drop = set(cfg.get("skip_layers", ()))
+    out = []
+    for L in layers:
+        if L.name in drop:
+            continue
+        if L.name in rel:
+            L = LayerResult(**{**L.__dict__, "reliability": rel[L.name]})
+        out.append(L)
+    return out
 
 
 def fuse(layers, weights=None):
@@ -31,11 +46,17 @@ def fuse(layers, weights=None):
     groups = defaultdict(list)
     for L in layers:
         groups[L.independence_group].append(L)
+    # search domain = cells allowed by every hard layer (Norwegian land)
+    domain = None
+    for L in layers:
+        if L.hard:
+            ok = ~np.isneginf(np.asarray(L.loglik, float))
+            domain = ok if domain is None else (domain & ok)
     total = None
     contrib = {}
     for g, ls in groups.items():
         w = np.array([max(L.reliability, 1e-3) for L in ls])
-        stack = np.stack([L.robust() * weights.get(L.name, 1.0) for L in ls])
+        stack = np.stack([L.robust(domain) * weights.get(L.name, 1.0) for L in ls])
         # hard exclusions survive the averaging
         hard = np.isneginf(stack).any(axis=0)
         s = np.where(np.isneginf(stack), 0.0, stack)
