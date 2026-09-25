@@ -1,0 +1,59 @@
+hoyde891 cells 17234
+
+filter {} -> 0
+  clusters (0.1deg): []
+
+filter {'nosky': False} -> 0
+  clusters (0.1deg): []
+
+filter {'need_tre': 0.65} -> 9
+  clusters (0.1deg): [((61.1, 10.9), 4), ((61.2, 10.9), 4), ((61.2, 10.8), 1)]
+   61.160,10.870 871 moh vei 48 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.3 dNOZ9EG 6.5 sky=False sol=False ute=None
+   61.160,10.860 857 moh vei 81 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.6 dNOZ9EG 6.6 sky=False sol=False ute=None
+   61.160,10.850 810 moh vei 22 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.8 dNOZ9EG 6.8 sky=False sol=False ute=None
+   61.155,10.870 863 moh vei 16 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.8 dNOZ9EG 7.0 sky=False sol=False ute=None
+   61.155,10.860 824 moh vei 333 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.1 dNOZ9EG 7.1 sky=False sol=False ute=None
+   61.150,10.870 851 moh vei 105 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.4 dNOZ9EG 7.5 sky=False sol=False ute=None
+   61.150,10.860 836 moh vei 15 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.6 dNOZ9EG 7.7 sky=False sol=False ute=None
+   61.145,10.870 853 moh vei 6 m SE=1 tre 0.69 vind 2.7 dNOZ56U 41.9 dNOZ9EG 8.1 sky=False sol=False ute=None
+   61.145,10.860 829 moh vei 371 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.1 dNOZ9EG 8.2 sky=False sol=False ute=None
+
+filter {'need_tre': 0.65, 'nosky': False} -> 9
+  clusters (0.1deg): [((61.1, 10.9), 4), ((61.2, 10.9), 4), ((61.2, 10.8), 1)]
+   61.160,10.870 871 moh vei 48 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.3 dNOZ9EG 6.5 sky=False sol=False ute=None
+   61.160,10.860 857 moh vei 81 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.6 dNOZ9EG 6.6 sky=False sol=False ute=None
+   61.160,10.850 810 moh vei 22 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.8 dNOZ9EG 6.8 sky=False sol=False ute=None
+   61.155,10.870 863 moh vei 16 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.8 dNOZ9EG 7.0 sky=False sol=False ute=None
+   61.155,10.860 824 moh vei 333 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.1 dNOZ9EG 7.1 sky=False sol=False ute=None
+   61.150,10.870 851 moh vei 105 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.4 dNOZ9EG 7.5 sky=False sol=False ute=None
+   61.150,10.860 836 moh vei 15 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.6 dNOZ9EG 7.7 sky=False sol=False ute=None
+   61.145,10.870 853 moh vei 6 m SE=1 tre 0.69 vind 2.7 dNOZ56U 41.9 dNOZ9EG 8.1 sky=False sol=False ute=None
+   61.145,10.860 829 moh vei 371 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.1 dNOZ9EG 8.2 sky=False sol=False ute=None
+
+filter {'maxfly': 25, 'need_tre': 0.65, 'nosky': False} -> 9
+  clusters (0.1deg): [((61.1, 10.9), 4), ((61.2, 10.9), 4), ((61.2, 10.8), 1)]
+   61.160,10.870 871 moh vei 48 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.3 dNOZ9EG 6.5 sky=False sol=False ute=None
+   61.160,10.860 857 moh vei 81 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.6 dNOZ9EG 6.6 sky=False sol=False ute=None
+   61.160,10.850 810 moh vei 22 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.8 dNOZ9EG 6.8 sky=False sol=False ute=None
+   61.155,10.870 863 moh vei 16 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.8 dNOZ9EG 7.0 sky=False sol=False ute=None
+   61.155,10.860 824 moh vei 333 m SE=1 tre 0.69 vind 2.7 dNOZ56U 43.1 dNOZ9EG 7.1 sky=False sol=False ute=None
+   61.150,10.870 851 moh vei 105 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.4 dNOZ9EG 7.5 sky=False sol=False ute=None
+   61.150,10.860 836 moh vei 15 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.6 dNOZ9EG 7.7 sky=False sol=False ute=None
+   61.145,10.870 853 moh vei 6 m SE=1 tre 0.69 vind 2.7 dNOZ56U 41.9 dNOZ9EG 8.1 sky=False sol=False ute=None
+   61.145,10.860 829 moh vei 371 m SE=1 tre 0.69 vind 2.7 dNOZ56U 42.1 dNOZ9EG 8.2 sky=False sol=False ute=None
+
+fellesskap891 cells 634
+with treslag value 2707 tre>=0.75 740 with vind 16960
+dfly<=15 460 dfly<=15 & SE 292
+[((61.2, 10.7), 97), ((61.2, 10.8), 74), ((61.3, 10.8), 69), ((61.3, 10.7), 50), ((61.2, 10.9), 33), ((61.1, 10.9), 30), ((61.1, 10.8), 29), ((61.1, 10.7), 27), ((61.3, 11.0), 26), ((61.2, 10.6), 12), ((61.2, 11.0), 10), ((61.3, 10.9), 3)]
+tre scores among dfly<=15: [(None, 329), (0.57, 42), (0.6, 20), (0.61, 19), (0.62, 12), (0.58, 11), (0.69, 10), (0.56, 8), (0.64, 6), (0.67, 3)]
+vind among dfly<=15: [(2.7, 407), (4.2, 48), (1.6, 3), (1.2, 2)]
+sky among dfly<=15: Counter({True: 251, False: 209})
+tre>=.75 clusters [((62.1, 10.4), 40), ((61.8, 12.0), 36), ((61.7, 10.6), 32), ((61.7, 9.9), 30), ((62.0, 11.2), 30), ((61.8, 11.0), 29), ((61.6, 10.8), 26), ((62.1, 10.2), 23), ((61.8, 10.5), 21), ((62.1, 10.7), 18), ((61.6, 12.1), 17), ((61.7, 10.0), 17), ((61.8, 10.6), 17), ((61.8, 12.1), 17), ((62.0, 10.5), 17)]
+tre>=.75 min dfly 35.635034504330704
+NOZ56U@21:29:15 nearest 790-911moh-near-road cell [24.14, 61.03, 11.26, 791] n<=10km 0 n<=20km 0
+NOZ56U@21:29:50 FLY_PUNKT nearest 790-911moh-near-road cell [17.747, 61.03, 11.26, 791] n<=10km 0 n<=20km 4
+NOZ9EG@21:29:15 nearest 790-911moh-near-road cell [0.286, 61.215, 10.9, 832] n<=10km 215 n<=20km 668
+SAS50J 25.09 nearest 790-911moh-near-road cell [34.852, 60.565, 10.9, 793] n<=10km 0 n<=20km 0
+NOZ56U@21:31:28 nearest 790-911moh-near-road cell [0.694, 61.035, 11.27, 803] n<=10km 4 n<=20km 5
+[(61.03, 11.26, 791, 457, 1, None, 2.6, False, False, None), (61.035, 11.27, 803, 731, 1, None, 2.6, False, True, None), (61.04, 11.26, 810, 706, 0, None, 2.6, False, False, None), (61.04, 11.27, 806, 856, 0, None, 2.6, False, True, None), (61.175, 11.21, 797, 687, 0, None, 1.2, False, False, None)]

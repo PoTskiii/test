@@ -1,0 +1,101 @@
+loten andel blått+tåke 0.0 andel sol23.09 0.315 blatt f 1.0 sol f 0.779
+rena andel blått+tåke 0.336 andel sol23.09 0.121 blatt f 0.681 sol f 0.545
+rudshogda andel blått+tåke 0.0 andel sol23.09 0.0 blatt f 1.0 sol f 0.4
+ringsaker andel blått+tåke 0.128 andel sol23.09 0.013 blatt f 0.879 sol f 0.416
+solor andel blått+tåke 0.0 andel sol23.09 1.0 blatt f 1.0 sol f 1.6
+gjovik andel blått+tåke 0.007 andel sol23.09 0.0 blatt f 0.994 sol f 0.4
+roros andel blått+tåke 0.121 andel sol23.09 0.0 blatt f 0.885 sol f 0.4
+valdres andel blått+tåke 0.369 andel sol23.09 0.0 blatt f 0.649 sol f 0.4
+agder andel blått+tåke 0.0 andel sol23.09 0.0 blatt f 1.0 sol f 0.4
+hardanger andel blått+tåke 1.0 andel sol23.09 0.0 blatt f 0.05 sol f 0.4
+
+== ALT mode defaults (app default on load) (28 active)
+   loten       36.39%
+   rena        22.14%
+   rudshogda   21.09%
+   ringsaker   11.93%
+   solor        3.52%
+   gjovik       2.38%
+   annet        1.57%
+   roros        0.90%
+   valdres      0.07%
+   agder        0.01%
+   hardanger    0.00%
+
+== HINT mode defaults (only own-observed) (15 active)
+   loten       34.13%
+   ringsaker   23.10%
+   rudshogda   11.46%
+   rena        10.82%
+   solor       10.63%
+   annet        3.91%
+   roros        3.64%
+   gjovik       1.71%
+   valdres      0.56%
+   agder        0.05%
+   hardanger    0.00%
+
+== ALT minus 'fly' table (27 active)
+   rena        28.98%
+   rudshogda   22.44%
+   loten       20.65%
+   solor        8.56%
+   ringsaker    8.12%
+   gjovik       5.06%
+   annet        3.82%
+   roros        2.20%
+   valdres      0.16%
+   agder        0.02%
+   hardanger    0.00%
+
+== ALT minus all 'folk' + minus proysen/stjerne/ekorn/bjorneparken/bergen/bokstaver (symbolic) (9 active)
+   loten       38.65%
+   ringsaker   18.68%
+   solor       13.24%
+   rena        12.83%
+   annet        4.87%
+   roros        4.54%
+   rudshogda    4.51%
+   gjovik       2.13%
+   valdres      0.50%
+   agder        0.06%
+   hardanger    0.00%
+
+== ALT + mandag (29 active)
+   loten       42.16%
+   rudshogda   24.44%
+   ringsaker   13.82%
+   rena        13.68%
+   gjovik       2.76%
+   solor        2.18%
+   annet        0.85%
+   roros        0.07%
+   valdres      0.05%
+   agder        0.00%
+   hardanger    0.00%
+
+== ALT + kjoretid (29 active)
+   loten       34.32%
+   rena        23.56%
+   rudshogda   20.07%
+   ringsaker   11.67%
+   solor        3.49%
+   annet        2.87%
+   gjovik       2.28%
+   roros        1.64%
+   valdres      0.08%
+   agder        0.01%
+   hardanger    0.00%
+
+per-factor multipliers (ALT defaults):
+loten prior 1 raw product 5.7218 [('solidag', 0.779), ('hagina-bjork', 1.1), ('regn1105', 1.1), ('fly', 3), ('defaultno', 1.2), ('terreng', 1.4), ('konsensus', 1.2), ('folk_utelukket', 0.79), ('folk_digeras', 1.1), ('folk_benny', 1.05), ('proysen', 1.1)]
+rena prior 1 raw product 3.4778 [('blatt', 0.681), ('solidag', 0.545), ('discord2509', 1.15), ('regn1105', 1.4), ('fjellmark', 1.2), ('fly', 1.3), ('defaultno', 1.5), ('terreng', 1.5), ('konsensus', 1.2), ('folk_utelukket', 0.94), ('folk_digeras', 1.4), ('proysen', 1.05)]
+rudshogda prior 1 raw product 3.3142 [('solidag', 0.4), ('soloppgang', 0.95), ('solmiddag', 0.95), ('hagina-bjork', 1.1), ('brumunddal', 1.1), ('regn1105', 1.05), ('fjellmark', 0.6), ('fly', 1.6), ('defaultno', 1.1), ('terreng', 1.2), ('konsensus', 1.2), ('folk_rudshogda', 1.5), ('stjerne', 1.2), ('proysen', 2.2), ('ekorn', 1.2)]
+ringsaker prior 1 raw product 1.874 [('blatt', 0.879), ('solidag', 0.416), ('solmiddag', 0.95), ('hagina-bjork', 0.6), ('brumunddal', 1.2), ('discord2509', 1.3), ('regn1105', 1.05), ('fjellmark', 1.4), ('fly', 2.5), ('defaultno', 1.2), ('terreng', 1.3), ('konsensus', 1.2), ('folk_utelukket', 0.85), ('folk_tretopp', 0.8), ('folk_ingenhytte', 0.8), ('proysen', 1.4), ('ekorn', 1.1)]
+solor prior 1 raw product 0.5535 [('solidag', 1.6), ('discord2509', 1.1), ('fjellmark', 0.8), ('fly', 0.7), ('terreng', 1.5), ('konsensus', 1.2), ('folk_utelukket', 0.26), ('folk_flisa', 1.2)]
+gjovik prior 1 raw product 0.374 [('blatt', 0.994), ('solidag', 0.4), ('soloppgang', 0.9), ('solmiddag', 0.9), ('fjellmark', 0.7), ('fly', 0.8), ('terreng', 1.2), ('konsensus', 1.2), ('gjovikvaer', 1.5), ('folk_utelukket', 0.96)]
+roros prior 1 raw product 0.1419 [('blatt', 0.885), ('solidag', 0.4), ('fjellmark', 1.3), ('fly', 0.7), ('defaultno', 1.1), ('terreng', 1.3), ('konsensus', 1.1), ('folk_utelukket', 0.28)]
+valdres prior 1 raw product 0.0116 [('blatt', 0.649), ('solidag', 0.4), ('soloppgang', 0.5), ('solmiddag', 0.4), ('fly', 0.8), ('defaultno', 1.1), ('terreng', 1.1), ('konsensus', 1.1), ('folk_utelukket', 0.15), ('bjorneparken', 1.4)]
+agder prior 1 raw product 0.0008 [('solidag', 0.4), ('soloppgang', 0.4), ('solmiddag', 0.3), ('froland', 0.15), ('fjellmark', 0.8), ('fly', 0.6), ('defaultno', 1.3), ('terreng', 1.3), ('folk_utelukket', 0.13), ('ekorn', 1.1)]
+hardanger prior 1 raw product 0.0 [('blatt', 0.05), ('solidag', 0.4), ('soloppgang', 0.2), ('solmiddag', 0.1), ('bokstaver', 2), ('fly', 0.6), ('defaultno', 0.8), ('terreng', 0.6), ('folk_utelukket', 0.1), ('bergen', 1.3)]
+annet prior 4 raw product 0.247 [('blatt', 0.7), ('solidag', 0.6), ('soloppgang', 0.7), ('solmiddag', 0.6), ('fly', 0.7), ('folk_utelukket', 0.5)]
