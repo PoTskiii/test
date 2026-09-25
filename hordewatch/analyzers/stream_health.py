@@ -281,13 +281,13 @@ class StreamHealthAnalyzer(Analyzer):
 
     def on_tick(self, ctx):
         self._bind(ctx)
-        snap = ctx.state.get("ingest_stats") or ctx.state.get("ingest")
-        if not snap:
-            try:
-                from ..ingest import latest_stats
-                snap = latest_stats()
-            except Exception:
-                snap = None
+        snap = None
+        try:   # exact snapshot of the active source (the published one is throttled to ~1/s)
+            from ..ingest import current_stats
+            snap = current_stats()
+        except Exception:
+            snap = None
+        snap = snap or ctx.state.get("ingest_stats") or ctx.state.get("ingest")
         if not snap:
             return []
         return self.process(snap, ctx.clock)
@@ -300,7 +300,11 @@ class StreamHealthAnalyzer(Analyzer):
             lat = float(snap["latency_pdt_s"])      # = capture - real_ts (pdt_offset_s already applied)
         else:
             lat = float(getattr(clock, "latency_s", 30.0) if clock is not None else 30.0)
-        ts_real = _dt(now - lat)
+        # replayed recordings: stamp with the media's own time, not the wall clock of the replay
+        if snap.get("mode") == "replay" and snap.get("last_real_ts"):
+            ts_real = _dt(float(snap["last_real_ts"]))
+        else:
+            ts_real = _dt(now - lat)
         ts_cap = _dt(now)
         obs = []
 
@@ -343,8 +347,10 @@ class StreamHealthAnalyzer(Analyzer):
         if len(series) > self.max_series:
             series = series[-self.max_series:]
 
-        # --- trim history
-        horizon = now - self.history_s
+        # --- trim history (relative to the newest data, so replayed old recordings are not discarded)
+        newest = max([now if snap.get("mode") != "replay" else -np.inf]
+                     + ([self._events[-1][0]] if self._events else []) + ([self._lags[-1][0]] if self._lags else []))
+        horizon = (newest if np.isfinite(newest) else now) - self.history_s
         while self._events and self._events[0][0] < horizon:
             self._events.popleft()
         while self._lags and self._lags[0][0] < horizon:

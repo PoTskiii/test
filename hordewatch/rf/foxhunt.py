@@ -204,10 +204,12 @@ def rssi_multilaterate(samples: Sequence[Sequence[float]], n: float = 2.7,
     def resid(params):
         return model(params) - rssi
 
-    guess = [x0, y0, p0_guess] + ([n] if fit_n else [])
     span = max(np.ptp(px), np.ptp(py), 100.0)
-    lo = [x0 - 5 * span, y0 - 5 * span, -20.0] + ([n_bounds[0]] if fit_n else [])
-    hi = [x0 + 5 * span, y0 + 5 * span, 60.0] + ([n_bounds[1]] if fit_n else [])
+    lo = [x0 - 5 * span, y0 - 5 * span, -40.0] + ([n_bounds[0]] if fit_n else [])
+    hi = [x0 + 5 * span, y0 + 5 * span, 90.0] + ([n_bounds[1]] if fit_n else [])
+    guess = [x0, y0, p0_guess] + ([n] if fit_n else [])
+    # keep the initial guess strictly inside the bounds
+    guess = [min(max(g, l + 1e-6), h - 1e-6) for g, l, h in zip(guess, lo, hi)]
     sol = least_squares(resid, guess, bounds=(lo, hi), method="trf", max_nfev=2000)
 
     tx, ty, P0 = sol.x[0], sol.x[1], sol.x[2]

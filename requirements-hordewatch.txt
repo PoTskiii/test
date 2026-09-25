@@ -19,3 +19,8 @@
 #   the imageio static build segfaults on MPEG-TS SDT tables, which segment mode strips; only the ffmpeg-direct
 #   HLS fallback needs a build that can parse them (checked automatically by ingest.ffmpeg.mpegts_safe)
 # keep yt-dlp current on the monitoring machine (`pip install -U yt-dlp`): YouTube changes break old versions
+# --- hordewatch sky / sun / rain / night analyzers ---
+# required (already in the venv): numpy, opencv-python-headless, scipy (cKDTree point matching; pure-numpy fallback)
+# optional: skyfield + skyfield-data (bundled de421.bsp) - moon altitude / illuminated fraction for moon_pixel
+#   gating in the night analyzer; without it every round saturated disk in the sky is reported (lower confidence)
+# no model downloads, no network; the solar position (NOAA algorithm, ~0.01 deg) is built in

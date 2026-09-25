@@ -1,0 +1,1349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hordewatch</title>
+<meta name="description" content="Live monitoring of the Hordejakten 2026 stream: observations, whiteboard, alerts, timeline, map and calibration">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%232a78d6'/%3E%3Ccircle cx='8' cy='8' r='2.5' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+:root {
+  color-scheme: light;
+  --page:#f9f9f7; --surface:#fcfcfb; --surface-2:#f1f0ec; --surface-3:#e7e6e0;
+  --text:#0b0b0b; --text-2:#52514e; --muted:#6f6d68; --axis-text:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10); --border-2:rgba(11,11,11,.20);
+  --accent:#2a78d6; --accent-ink:#1c5cab; --accent-wash:rgba(42,120,214,.10);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300;
+  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --good-ink:#006300; --warn-ink:#8a5a00; --crit-ink:#b02a2a;
+  --night:rgba(11,11,11,.05);
+  --shadow:0 1px 2px rgba(0,0,0,.05), 0 6px 20px rgba(0,0,0,.07);
+  --radius:10px;
+  --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --surface-2:#232321; --surface-3:#2e2e2b;
+    --text:#ffffff; --text-2:#c3c2b7; --muted:#a3a198; --axis-text:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10); --border-2:rgba(255,255,255,.20);
+    --accent:#3987e5; --accent-ink:#86b6ef; --accent-wash:rgba(57,135,229,.16);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
+    --good-ink:#0ca30c; --warn-ink:#fab219; --crit-ink:#e66767;
+    --night:rgba(255,255,255,.045);
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page:#0d0d0d; --surface:#1a1a19; --surface-2:#232321; --surface-3:#2e2e2b;
+  --text:#ffffff; --text-2:#c3c2b7; --muted:#a3a198; --axis-text:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10); --border-2:rgba(255,255,255,.20);
+  --accent:#3987e5; --accent-ink:#86b6ef; --accent-wash:rgba(57,135,229,.16);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
+  --good-ink:#0ca30c; --warn-ink:#fab219; --crit-ink:#e66767;
+  --night:rgba(255,255,255,.045);
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.35);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--page); color: var(--text); font: 14px/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: var(--accent-ink); }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.btn { border: 1px solid var(--border-2); background: var(--surface); border-radius: 7px; padding: 4px 10px; line-height: 1.3; }
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { filter: brightness(1.07); }
+.btn.small { padding: 2px 8px; font-size: 12.5px; }
+.btn[aria-pressed="true"] { background: var(--accent-wash); border-color: var(--accent); }
+input[type=text], input[type=search], input[type=number], input[type=datetime-local], select {
+  border: 1px solid var(--border-2); background: var(--surface); border-radius: 7px; padding: 4px 8px; min-width: 0; }
+input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.num { font-variant-numeric: tabular-nums; }
+.hidden { display: none !important; }
+
+/* ---------- header */
+header.top { position: sticky; top: 0; z-index: 30; background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 16px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 16px; white-space: nowrap; }
+.brand small { font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 360px; min-width: 0; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--surface-2);
+  border-radius: 999px; padding: 2px 10px 2px 8px; font-size: 12.5px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.chip .ic { font-size: 10px; line-height: 1; }
+.chip[data-state="good"] .ic { color: var(--good); }
+.chip[data-state="warn"] .ic { color: var(--warning); }
+.chip[data-state="bad"] .ic { color: var(--critical); }
+.chip[data-state="idle"] .ic { color: var(--axis-text); }
+.clock { display: flex; gap: 12px; font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
+.clock b { font-weight: 600; }
+nav.tabs { display: flex; gap: 2px; padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; position: sticky; top: var(--hdr-h, 49px); z-index: 25; }
+nav.tabs button { border: 0; background: none; padding: 9px 12px 8px; border-bottom: 2px solid transparent; color: var(--text-2); white-space: nowrap; }
+nav.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+nav.tabs button:hover { color: var(--text); }
+.badge { display: inline-block; min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--critical); color: #fff; font-size: 11.5px; font-weight: 600; text-align: center; line-height: 18px; vertical-align: 1px; }
+.badge:empty { display: none; }
+
+/* ---------- layout */
+main.layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; padding: 16px; align-items: start; }
+@media (max-width: 1150px) { main.layout { grid-template-columns: minmax(0, 1fr); } aside.side { position: static !important; max-height: none !important; } }
+@media (max-width: 600px) { main.layout { padding: 12px 8px; gap: 12px; } header.top { padding: 8px; } }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
+.card > h2, .card-h { margin: 0; font-size: 14px; font-weight: 650; padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card-h .sp { flex: 1; }
+.pad { padding: 12px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.toolbar label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 13px; }
+.toolbar .sp { flex: 1; }
+section.panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+aside.side { position: sticky; top: calc(var(--hdr-h, 49px) + 44px); display: flex; flex-direction: column; gap: 16px; max-height: calc(100vh - var(--hdr-h, 49px) - 60px); min-width: 0; }
+.scroll-x { overflow-x: auto; }
+
+/* ---------- tables */
+table.data { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+table.data th { text-align: left; font-weight: 600; color: var(--text-2); font-size: 12.5px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+table.data td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.data tr.clickable { cursor: pointer; }
+table.data tr.clickable:hover td { background: var(--surface-2); }
+table.data tr.fresh td { animation: fresh 2.5s ease-out; }
+@keyframes fresh { from { background: var(--accent-wash); } to { background: transparent; } }
+.tcell { display: flex; flex-direction: column; line-height: 1.25; white-space: nowrap; }
+.tcell .t-utc { color: var(--muted); font-size: 12px; }
+.kind { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }
+.kind i { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
+.meter { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.meter span.bar { width: 42px; height: 6px; background: var(--surface-3); border-radius: 3px; overflow: hidden; display: inline-block; }
+.meter span.bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.summary { max-width: 560px; overflow-wrap: anywhere; }
+.links { white-space: nowrap; display: flex; gap: 8px; }
+.links a { font-size: 12.5px; }
+.table-wrap { max-height: calc(100vh - 260px); overflow: auto; }
+.empty { padding: 28px 12px; text-align: center; color: var(--muted); }
+.more-row { padding: 10px; text-align: center; }
+.newbar { margin: 8px 12px 0; }
+
+/* ---------- dropdown */
+details.dd { position: relative; }
+details.dd > summary { list-style: none; border: 1px solid var(--border-2); border-radius: 7px; padding: 4px 26px 4px 10px; background: var(--surface); cursor: pointer; white-space: nowrap; position: relative; }
+details.dd > summary::-webkit-details-marker { display: none; }
+details.dd > summary::after { content: "▾"; position: absolute; right: 9px; color: var(--muted); }
+details.dd[open] > summary { border-color: var(--accent); }
+.dd-body { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; width: min(420px, 90vw); max-height: 60vh; overflow: auto; background: var(--surface); border: 1px solid var(--border-2); border-radius: 9px; box-shadow: var(--shadow); padding: 8px; }
+.dd-body .grp { margin: 6px 0 2px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.dd-body label { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px; font-size: 13px; }
+.dd-body label:hover { background: var(--surface-2); }
+.dd-body label .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dd-body label.zero { opacity: .55; }
+.dd-body .row { display: flex; gap: 6px; margin-bottom: 6px; }
+
+/* ---------- alerts */
+.alerts { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.alerts ul { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 120px; }
+.alerts li { padding: 10px 12px; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; }
+.alerts li.new { box-shadow: inset 3px 0 0 var(--accent); }
+.alerts li.fresh { animation: fresh 3s ease-out; }
+.alerts li .ev-sum { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.alerts li .ev-meta { font-size: 12px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.alerts li details { grid-column: 1 / -1; }
+.alerts li details summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+.status-tag { font-size: 11.5px; border-radius: 999px; padding: 0 7px; border: 1px solid var(--border-2); color: var(--text-2); white-space: nowrap; }
+pre.json { margin: 6px 0 0; max-height: 280px; overflow: auto; background: var(--surface-2); border-radius: 7px; padding: 8px; font: 12px/1.4 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ---------- latest frame */
+.lf figure { margin: 0; }
+.lf img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--surface-3); border-bottom: 1px solid var(--border); cursor: zoom-in; border-radius: var(--radius) var(--radius) 0 0; }
+.lf figcaption { padding: 8px 12px; font-size: 12.5px; color: var(--text-2); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.lf .noimg { aspect-ratio: 16 / 9; display: grid; place-items: center; color: var(--muted); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; font-size: 13px; padding: 12px; text-align: center; }
+
+/* ---------- whiteboard */
+.boards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 12px; padding: 12px; }
+.board { border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--surface); display: flex; flex-direction: column; }
+.board.isnew { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.board .crop { background: var(--surface-3); min-height: 90px; display: grid; place-items: center; }
+.board .crop img { display: block; width: 100%; max-height: 300px; object-fit: contain; cursor: zoom-in; }
+.board .crop .noimg { color: var(--muted); font-size: 12.5px; padding: 16px; text-align: center; }
+.board .txt { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.board .src { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; display: flex; gap: 8px; align-items: center; }
+.board .bt { font-size: 17px; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.3; }
+.board .bt.vlm { font-size: 15px; font-weight: 500; color: var(--text-2); }
+.board .meta { font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; border-top: 1px solid var(--border); padding: 8px 12px; }
+.pill { font-size: 11px; font-weight: 700; letter-spacing: .04em; border-radius: 999px; padding: 1px 7px; border: 1px solid var(--border-2); }
+.pill.new { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- timeline */
+.chart-wrap { position: relative; padding: 4px 8px 8px; }
+.chart-wrap svg { display: block; width: 100%; touch-action: pan-y; }
+.chart-wrap.loading svg { opacity: .55; transition: opacity .2s; }
+svg text { font-family: var(--sans); }
+.ax-t { fill: var(--axis-text); font-size: 11px; font-variant-numeric: tabular-nums; }
+.lane-t { fill: var(--text-2); font-size: 12px; font-weight: 600; }
+.leg-t { fill: var(--text-2); font-size: 11.5px; }
+.gridl { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
+.axisl { stroke: var(--axis); stroke-width: 1; shape-rendering: crispEdges; }
+.refl { stroke: var(--axis); stroke-width: 1; }
+.night { fill: var(--night); }
+.ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.c1 { stroke: var(--s1); } .c2 { stroke: var(--s2); } .c3 { stroke: var(--s3); } .c4 { stroke: var(--s4); } .c5 { stroke: var(--s5); } .c6 { stroke: var(--s6); }
+.f1 { fill: var(--s1); } .f2 { fill: var(--s2); } .f3 { fill: var(--s3); } .f4 { fill: var(--s4); } .f5 { fill: var(--s5); } .f6 { fill: var(--s6); }
+.mk { stroke: var(--surface); stroke-width: 2; }
+.mk.hot { stroke: var(--text); stroke-width: 1.5; }
+.xh { stroke: var(--text-2); stroke-width: 1; pointer-events: none; shape-rendering: crispEdges; }
+.tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface); border: 1px solid var(--border-2); border-radius: 8px; box-shadow: var(--shadow); padding: 8px 10px; font-size: 12.5px; min-width: 190px; max-width: 340px; }
+.tip .tt { font-weight: 600; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.tip .tr { display: flex; align-items: baseline; gap: 6px; }
+.tip .tr i { width: 12px; height: 2px; border-radius: 1px; flex: none; display: inline-block; transform: translateY(-3px); }
+.tip .tr b { font-variant-numeric: tabular-nums; }
+.tip .tr span { color: var(--text-2); }
+.tip .sep { border-top: 1px solid var(--border); margin: 5px 0; }
+.tip .ev { color: var(--text-2); overflow-wrap: anywhere; }
+
+/* ---------- stat tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; padding: 12px; }
+.tile { border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; background: var(--surface); }
+.tile .lbl { font-size: 12.5px; color: var(--text-2); }
+.tile .val { font-size: 24px; font-weight: 600; margin-top: 2px; }
+.tile .sub { font-size: 12px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font-size: 13px; }
+.kv dt { color: var(--text-2); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.cal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 16px; }
+.form-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; }
+.form-row label { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--text-2); }
+.form-row input { width: 120px; }
+
+/* ---------- map */
+#leaf { height: 460px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+#leaf .leaflet-popup-content { font: 13px/1.4 var(--sans); }
+iframe.engine { width: 100%; height: 640px; border: 0; display: block; border-radius: 0 0 var(--radius) var(--radius); background: var(--surface-2); }
+
+/* ---------- dialog + toast */
+dialog { border: 1px solid var(--border-2); border-radius: 12px; background: var(--surface); color: var(--text); padding: 0; width: min(980px, 96vw); max-height: 92vh; box-shadow: var(--shadow); }
+dialog::backdrop { background: rgba(0,0,0,.45); }
+dialog .dh { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); }
+dialog .dh h3 { margin: 0; font-size: 15px; flex: 1; overflow-wrap: anywhere; }
+dialog .db { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+dialog img { max-width: 100%; border-radius: 8px; display: block; }
+#toasts { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: flex; flex-direction: column; gap: 8px; max-width: min(420px, 92vw); }
+.toast { background: var(--surface); border: 1px solid var(--border-2); border-left: 3px solid var(--critical); border-radius: 8px; padding: 8px 12px; box-shadow: var(--shadow); font-size: 13px; }
+.toast.info { border-left-color: var(--accent); }
+@media (forced-colors: active) { .ln { stroke: CanvasText; } .mk { fill: CanvasText; } }
+</style>
+</head>
+<body>
+<header class="top" id="hdr">
+  <div class="brand">
+    <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2.5" fill="var(--accent)"/></svg>
+    hordewatch <small>Hordejakten 2026 live monitor</small>
+  </div>
+  <div class="chips" id="chips" aria-live="polite">
+    <span class="chip" id="chip-sse" data-state="idle" title="Server-Sent Events connection (live updates)"><span class="ic" aria-hidden="true">○</span><span class="lbl">Connecting…</span></span>
+    <span class="chip" id="chip-runner" data-state="idle" title="Time since the runner last wrote an observation"><span class="ic" aria-hidden="true">○</span><span class="lbl">Runner –</span></span>
+    <span class="chip" id="chip-stream" data-state="idle" title="Latest stream_health observation"><span class="ic" aria-hidden="true">○</span><span class="lbl">Stream –</span></span>
+    <span class="chip" id="chip-latency" data-state="idle" title="Stream latency (capture − on-site time) used to convert times"><span class="ic" aria-hidden="true">○</span><span class="lbl">Latency –</span></span>
+  </div>
+  <div class="clock" aria-label="Current time"><span>Oslo <b id="clk-oslo">--:--:--</b></span><span class="muted">UTC <span id="clk-utc">--:--:--</span></span></div>
+  <button class="btn small" id="theme-btn" title="Theme: follow system / light / dark">Theme: auto</button>
+</header>
+<nav class="tabs" role="tablist" aria-label="Views" id="tabs">
+  <button role="tab" data-tab="obs" aria-selected="true">Observations</button>
+  <button role="tab" data-tab="boards" aria-selected="false">Whiteboard <span class="badge" id="badge-boards"></span></button>
+  <button role="tab" data-tab="timeline" aria-selected="false">Timeline</button>
+  <button role="tab" data-tab="map" aria-selected="false">Map &amp; hotspots</button>
+  <button role="tab" data-tab="cal" aria-selected="false">Calibration</button>
+  <button role="tab" data-tab="alerts" aria-selected="false" id="tab-alerts-mobile" class="hidden">Alerts <span class="badge" id="badge-alerts-m"></span></button>
+</nav>
+
+<main class="layout">
+  <div id="content">
+    <!-- ================= observations -->
+    <section class="panel" id="panel-obs" role="tabpanel">
+      <div class="card">
+        <div class="toolbar" id="obs-filters">
+          <details class="dd" id="kind-dd"><summary id="kind-sum">Kinds: all</summary><div class="dd-body" id="kind-body"></div></details>
+          <label>Analyzer <select id="f-analyzer"><option value="">all</option></select></label>
+          <label>Min conf <input type="range" id="f-conf" min="0" max="1" step="0.05" value="0" style="width:90px"><output id="f-conf-o" class="num">0.00</output></label>
+          <label>Time <select id="f-win"><option value="">all</option><option value="1h">last 1 h</option><option value="6h">last 6 h</option><option value="24h">last 24 h</option><option value="3d">last 3 d</option></select></label>
+          <input type="search" id="f-q" placeholder="Search values…" aria-label="Search observation values" style="width:170px">
+          <span class="sp"></span>
+          <label title="Prepend new observations as they arrive"><input type="checkbox" id="f-live" checked> Live</label>
+          <button class="btn small" id="obs-refresh">Refresh</button>
+        </div>
+        <div id="obs-newbar" class="newbar hidden"><button class="btn small primary" id="obs-shownew"></button></div>
+        <div class="table-wrap">
+          <table class="data" id="obs-table">
+            <thead><tr><th>Time (Oslo / UTC)</th><th>Kind</th><th>Conf</th><th>Value</th><th>Analyzer</th><th>Media</th></tr></thead>
+            <tbody id="obs-body"></tbody>
+          </table>
+          <div class="empty hidden" id="obs-empty">No observations match these filters yet.</div>
+          <div class="more-row"><button class="btn small hidden" id="obs-more">Load older</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= whiteboard -->
+    <section class="panel hidden" id="panel-boards" role="tabpanel">
+      <div class="card">
+        <div class="toolbar">
+          <strong>Whiteboard transcripts</strong><span class="muted" id="boards-count"></span>
+          <span class="sp"></span>
+          <label><input type="checkbox" id="boards-new"> Only new boards</label>
+          <button class="btn small" id="boards-refresh">Refresh</button>
+        </div>
+        <div class="boards" id="boards"></div>
+        <div class="empty hidden" id="boards-empty">No whiteboard text yet. Boards are detected, OCR'd and (if a local VLM runs) transcribed automatically.</div>
+      </div>
+    </section>
+
+    <!-- ================= timeline -->
+    <section class="panel hidden" id="panel-timeline" role="tabpanel">
+      <div class="card">
+        <div class="toolbar">
+          <span role="group" aria-label="Time range" id="tl-ranges">
+            <button class="btn small" data-range="6h">6 h</button>
+            <button class="btn small" data-range="24h">24 h</button>
+            <button class="btn small" data-range="3d">3 d</button>
+            <button class="btn small" data-range="all">All</button>
+            <button class="btn small" data-range="custom">Custom</button>
+          </span>
+          <span id="tl-custom" class="hidden" style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <label>From <input type="datetime-local" id="tl-from" step="60"></label>
+            <label>to <input type="datetime-local" id="tl-to" step="60"></label>
+            <span class="muted" style="font-size:12px">Oslo time</span>
+            <button class="btn small primary" id="tl-apply">Apply</button>
+          </span>
+          <span class="sp"></span>
+          <label><input type="checkbox" id="tl-auto" checked> Auto-refresh</label>
+          <button class="btn small" id="tl-table" aria-pressed="false">Table view</button>
+        </div>
+        <div class="pad muted" style="padding-bottom:0;font-size:12.5px" id="tl-info"></div>
+        <div class="chart-wrap" id="tl-wrap"><svg id="tl-svg" role="img" aria-label="Timeline chart"></svg><div class="tip hidden" id="tl-tip"></div></div>
+        <div class="scroll-x hidden" id="tl-tablewrap" style="max-height:480px;overflow:auto"></div>
+      </div>
+    </section>
+
+    <!-- ================= map -->
+    <section class="panel hidden" id="panel-map" role="tabpanel">
+      <div class="card">
+        <div class="toolbar">
+          <label>Ranking <select id="map-source"><option value="base">Base engine (hotspots.json)</option><option value="scenarios">Scenario-averaged (scenario_hotspots.json)</option></select></label>
+          <span role="group" aria-label="Map view">
+            <button class="btn small" data-mview="live" aria-pressed="true">Hotspot map</button>
+            <button class="btn small" data-mview="engine" aria-pressed="false">Engine map.html</button>
+          </span>
+          <span class="sp"></span>
+          <span class="muted" id="map-mtime" style="font-size:12.5px"></span>
+          <button class="btn small" id="map-refresh">Refresh</button>
+        </div>
+        <div class="tiles" id="map-tiles"></div>
+        <div id="map-live"><div id="leaf"></div></div>
+        <div id="map-engine" class="hidden"></div>
+      </div>
+      <div class="card">
+        <h2>Top hotspots <span class="muted" style="font-weight:400;font-size:12.5px">P(box within 1.5 km); click a row to fly there</span></h2>
+        <div class="scroll-x"><table class="data" id="hs-table"><thead></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <h2>Live evidence layers <span class="muted" style="font-weight:400;font-size:12.5px" id="layers-dir"></span></h2>
+        <div class="scroll-x"><table class="data" id="layers-table"><thead><tr><th>Layer</th><th>Reliability</th><th>Group</th><th>Cells</th><th>Peak</th><th>Updated (Oslo)</th><th>Description</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <h2>Engine runs</h2>
+        <div class="scroll-x"><table class="data" id="hist-table"><thead><tr><th>Run (Oslo)</th><th>#1 spot</th><th>50 % area</th><th>Change</th><th>Live layers</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- ================= calibration -->
+    <section class="panel hidden" id="panel-cal" role="tabpanel">
+      <div class="card"><div class="tiles" id="cal-tiles"></div></div>
+      <div class="cal-grid">
+        <div class="card"><h2>Camera model</h2><div class="pad" id="cal-camera"></div></div>
+        <div class="card"><h2>Manual overrides</h2><div class="pad" id="cal-form"></div></div>
+      </div>
+      <div class="card">
+        <h2>Timing evidence <span class="muted" style="font-weight:400;font-size:12.5px">stream_latency · av_offset · clock_seen · uplink_signature</span></h2>
+        <div class="scroll-x"><table class="data" id="cal-ev"><thead><tr><th>Time (Oslo / UTC)</th><th>Kind</th><th>Conf</th><th>Value</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <h2>All calibration values</h2>
+        <div class="scroll-x"><table class="data" id="cal-rows"><thead><tr><th>Key</th><th>Value</th><th>Updated (Oslo)</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </section>
+  </div>
+
+  <aside class="side" id="side">
+    <div class="card lf" id="lf">
+      <div class="noimg" id="lf-noimg">No archived frame yet</div>
+      <figure class="hidden" id="lf-fig"><img id="lf-img" alt="Latest archived frame from the stream"><figcaption id="lf-cap"></figcaption></figure>
+    </div>
+    <div class="card alerts" id="alerts">
+      <div class="card-h">Alerts <span class="badge" id="badge-alerts"></span><span class="sp"></span>
+        <select id="ev-status" aria-label="Alert filter"><option value="new">New</option><option value="all">All</option><option value="ack">Acknowledged</option></select>
+        <button class="btn small" id="ev-ackall" title="Acknowledge every new alert shown">Ack all</button>
+      </div>
+      <div class="toolbar" style="padding:6px 12px">
+        <button class="btn small" id="notif-btn" aria-pressed="false" title="Desktop notification for each new alert while this tab is in the background">Desktop alerts</button>
+        <button class="btn small" id="sound-btn" aria-pressed="false" title="Short sound for each new alert">Sound</button>
+      </div>
+      <ul id="ev-list" aria-live="polite"></ul>
+      <div class="empty hidden" id="ev-empty">No alerts.</div>
+    </div>
+  </aside>
+</main>
+
+<dialog id="dlg"><div class="dh"><h3 id="dlg-title"></h3><button class="btn small" id="dlg-close">Close</button></div><div class="db" id="dlg-body"></div></dialog>
+<div id="toasts" aria-live="assertive"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" crossorigin="" defer></script>
+<script>
+'use strict';
+/* =====================================================================================
+   hordewatch dashboard - vanilla JS, no build step. All untrusted text goes through
+   textContent (never innerHTML). Times: the API gives UTC ISO; we show Europe/Oslo (stream /
+   on-site local time) first and UTC second. All URLs are relative so the page also works
+   behind a reverse-proxy sub-path.
+   ===================================================================================== */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const SVGNS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  setAttrs(e, attrs);
+  for (const k of kids.flat(3)) if (k != null && k !== false) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return e;
+}
+function sv(tag, attrs, text) {
+  const e = document.createElementNS(SVGNS, tag);
+  setAttrs(e, attrs);
+  if (text != null) e.textContent = String(text);
+  return e;
+}
+function setAttrs(e, attrs) {
+  if (!attrs) return;
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') e.setAttribute('class', v);
+    else if (k === 'text') e.textContent = v;
+    else if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v === true ? '' : v);
+  }
+}
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('hw.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('hw.' + k, JSON.stringify(v)); } catch { /* private mode */ } },
+};
+async function api(path, opts = {}) {
+  const init = { ...opts, headers: { Accept: 'application/json', ...(opts.body ? { 'Content-Type': 'application/json' } : {}) } };
+  const r = await fetch(path, init);
+  if (!r.ok) {
+    let msg = `${r.status} ${r.statusText}`;
+    try { const j = await r.json(); if (j.detail) msg += ': ' + (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)); } catch { /* not json */ }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+function toast(msg, kind = 'error', ms = 6000) {
+  const t = el('div', { class: 'toast ' + kind, role: kind === 'error' ? 'alert' : 'status' }, msg);
+  $('#toasts').append(t);
+  setTimeout(() => t.remove(), ms);
+}
+function debounce(fn, ms) { let t = null; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+const fmtNum = (x, nd = 2) => (x == null || !isFinite(x)) ? '–' : Number(x).toFixed(nd);
+
+/* ---------- time */
+const TZ = 'Europe/Oslo';
+const mkFmt = tz => new Intl.DateTimeFormat('en-GB', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+const F_OSLO = mkFmt(TZ), F_UTC = mkFmt('UTC');
+function tparts(fmt, d) { const o = {}; for (const p of fmt.formatToParts(d)) o[p.type] = p.value; return o; }
+function toDate(x) { return x instanceof Date ? x : new Date(typeof x === 'number' ? x : String(x)); }
+function fmtT(x, tz = 'oslo', date = true, secs = true) {
+  if (x == null || x === '') return '–';
+  const d = toDate(x); if (isNaN(d)) return String(x);
+  const p = tparts(tz === 'utc' ? F_UTC : F_OSLO, d);
+  return (date ? `${p.day}.${p.month} ` : '') + `${p.hour}:${p.minute}` + (secs ? `:${p.second}` : '');
+}
+function osloOffsetMs(ms) { const p = tparts(F_OSLO, new Date(ms)); return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - (ms - (ms % 1000)); }
+function osloLocalToUtcMs(s) { // 'YYYY-MM-DDTHH:MM' interpreted as Europe/Oslo wall time (DST-aware)
+  const m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/.exec(s || ''); if (!m) return null;
+  const guess = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  let t = guess - osloOffsetMs(guess); t = guess - osloOffsetMs(t); return t;
+}
+function utcMsToOsloLocal(ms) { const p = tparts(F_OSLO, new Date(ms)); return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`; }
+function ago(x) {
+  if (!x) return '';
+  const s = (Date.now() - toDate(x).getTime()) / 1000;
+  if (!isFinite(s)) return '';
+  if (s < 0) return 'in the future';
+  if (s < 60) return `${Math.round(s)} s ago`;
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400 * 2) return `${(s / 3600).toFixed(s < 36000 ? 1 : 0)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
+}
+function timeCell(iso) {
+  return el('div', { class: 'tcell', title: `${iso} (UTC ISO)` },
+    el('span', { class: 't-oslo' }, fmtT(iso)), el('span', { class: 't-utc' }, fmtT(iso, 'utc', false) + ' UTC'));
+}
+
+/* ---------- kinds / categories */
+const CATS = [
+  ['vision', 'Vision', /^(whiteboard_|vlm_|scene_change|object_|gesture_|person_|ir_mode)/, 1],
+  ['sky', 'Sky, light & weather', /^(sky_|scene_photometry|cloud_|direct_sun|sun_pixel|shadow_|rain_|condensation|fog|temperature|night_light|aircraft_light|star_|moon_|plate_)/, 2],
+  ['audio', 'Audio', /^(audio_|av_offset)/, 3],
+  ['stream', 'Stream & timing', /^(stream_|uplink_|clock_)/, 4],
+  ['derived', 'Bridges & astro', /./, 5],
+];
+const catOf = k => CATS.find(c => c[2].test(k)) || CATS[CATS.length - 1];
+function kindTag(k) { const c = catOf(k); return el('span', { class: 'kind', title: c[1] }, el('i', { class: '', style: `background:var(--s${c[3]})` }), k); }
+function meter(c) {
+  if (c == null) return '–';
+  const v = Math.max(0, Math.min(1, +c));
+  return el('span', { class: 'meter', title: `confidence ${v.toFixed(2)}` }, el('span', { class: 'bar' }, el('i', { style: `width:${(v * 100).toFixed(0)}%` })), el('span', { class: 'num' }, v.toFixed(2)));
+}
+function setChip(id, state, label, title) {
+  const c = $(id); if (!c) return;
+  c.dataset.state = state;
+  c.querySelector('.ic').textContent = { good: '●', warn: '▲', bad: '✕', idle: '○' }[state] || '○';
+  c.querySelector('.lbl').textContent = label;
+  if (title) c.title = title;
+}
+
+/* =====================================================================================
+   Tabs
+   ===================================================================================== */
+const PANELS = ['obs', 'boards', 'timeline', 'map', 'cal'];
+const loaded = {};
+let activeTab = 'obs';
+const narrow = () => window.matchMedia('(max-width: 1150px)').matches;
+function showTab(name) {
+  if (name === 'alerts') { $('#side').scrollIntoView({ behavior: 'smooth' }); return; }
+  if (!PANELS.includes(name)) name = 'obs';
+  activeTab = name;
+  for (const b of $$('#tabs button[data-tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === name));
+  for (const p of PANELS) $('#panel-' + p).classList.toggle('hidden', p !== name);
+  store.set('tab', name);
+  if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+  const loader = { boards: loadBoards, timeline: loadTimeline, map: loadMap, cal: loadCal }[name];
+  if (loader && (!loaded[name] || name === 'cal')) { loaded[name] = true; loader(); }
+  if (name === 'map' && MAP.map) setTimeout(() => MAP.map.invalidateSize(), 50);
+  if (name === 'timeline' && TL.data) renderTimeline();
+  if (name === 'boards') { BOARDS.unseen = 0; $('#badge-boards').textContent = ''; }
+}
+
+/* =====================================================================================
+   Header status
+   ===================================================================================== */
+let STATUS = null;
+async function loadStatus() {
+  try {
+    const s = STATUS = await api('api/status');
+    const age = s.last_write_age_s;
+    if (age == null) setChip('#chip-runner', 'idle', 'Runner: no data yet', 'No observation in the database yet');
+    else setChip('#chip-runner', age < 120 ? 'good' : age < 600 ? 'warn' : 'bad', `Runner ${age < 120 ? 'writing' : 'silent'} · ${ago(s.last_observation_created)}`,
+      `Last observation written ${s.last_observation_created}; frames/min ${s.frames_per_min ?? '–'}; DB ${s.db} (${s.db_size_mb ?? '?'} MB)`);
+    const h = s.stream_health;
+    if (h) {
+      const v = h.value || {};
+      const stalls = s.stalls_last_hour || 0;
+      const up = s.uplink && s.uplink.value ? ` · ${s.uplink.value.verdict}` : '';
+      setChip('#chip-stream', stalls > 3 ? 'warn' : 'good', `Stream ${fmtNum(v.bitrate_kbps, 0)} kbit/s · ${fmtNum(v.fps, 0)} fps · ${stalls} stalls/h${up}`,
+        `stream_health ${h.ts} - ${h.summary}${s.uplink ? '\nuplink: ' + s.uplink.summary : ''}`);
+    } else setChip('#chip-stream', 'idle', 'Stream: no health data', 'No stream_health observation yet');
+    updateLatencyChip(s.latency_s, s.latency_sigma_s, s.audio_offset_s);
+  } catch (e) { setChip('#chip-runner', 'bad', 'Dashboard API unreachable', String(e)); }
+}
+function updateLatencyChip(lat, sig, aoff) {
+  if (lat == null) setChip('#chip-latency', 'idle', 'Latency: config default', 'No calibrated latency yet: the runner uses clock.latency_s from the config (±15 s)');
+  else setChip('#chip-latency', sig != null && sig < 10 ? 'good' : 'warn', `Latency ${fmtNum(lat, 1)}${sig != null ? ' ± ' + fmtNum(sig, 1) : ''} s`,
+    `Calibrated stream latency (capture − on-site time). Audio offset: ${aoff ?? '–'} s`);
+}
+function tickClock() { const d = new Date(); $('#clk-oslo').textContent = fmtT(d, 'oslo', false); $('#clk-utc').textContent = fmtT(d, 'utc', false); }
+
+/* =====================================================================================
+   Observations
+   ===================================================================================== */
+const OBS = { rows: 0, next: null, buffer: [], kinds: [], sel: new Set(store.get('kinds', [])), analyzer: store.get('analyzer', ''),
+  minConf: store.get('minConf', 0), win: store.get('win', ''), q: '', live: true, maxId: 0, seq: 0 };
+async function loadKinds() {
+  try {
+    const d = await api('api/kinds');
+    OBS.kinds = d.kinds;
+    renderKindPicker();
+    const sel = $('#f-analyzer'), cur = OBS.analyzer;
+    sel.replaceChildren(el('option', { value: '' }, 'all'), ...d.analyzers.map(a => el('option', { value: a.analyzer }, `${a.analyzer} (${a.n})`)));
+    sel.value = cur;
+  } catch (e) { toast('Kinds: ' + e.message); }
+}
+function renderKindPicker() {
+  const body = $('#kind-body'); body.replaceChildren();
+  const search = el('input', { type: 'search', placeholder: 'Filter kinds…', 'aria-label': 'Filter kinds', style: 'flex:1' });
+  body.append(el('div', { class: 'row' }, search,
+    el('button', { class: 'btn small', onclick: () => { OBS.sel.clear(); kindsChanged(); } }, 'All'),
+    el('button', { class: 'btn small', onclick: () => { OBS.sel = new Set(OBS.kinds.filter(k => k.n > 0).map(k => k.kind)); kindsChanged(); } }, 'Only seen')));
+  const list = el('div');
+  body.append(list);
+  const draw = () => {
+    list.replaceChildren();
+    const f = search.value.trim().toLowerCase();
+    for (const c of CATS) {
+      const ks = OBS.kinds.filter(k => catOf(k.kind) === c && (!f || k.kind.includes(f) || (k.description || '').toLowerCase().includes(f)))
+        .sort((a, b) => (b.n > 0) - (a.n > 0) || a.kind.localeCompare(b.kind));
+      if (!ks.length) continue;
+      list.append(el('div', { class: 'grp' }, c[1]));
+      for (const k of ks) {
+        const cb = el('input', { type: 'checkbox', checked: OBS.sel.has(k.kind) });
+        cb.addEventListener('change', () => { cb.checked ? OBS.sel.add(k.kind) : OBS.sel.delete(k.kind); kindsChanged(false); });
+        list.append(el('label', { class: k.n ? '' : 'zero', title: k.description || '' }, cb, kindTag(k.kind), el('span', { class: 'n' }, k.n.toLocaleString('en-US'))));
+      }
+    }
+  };
+  search.addEventListener('input', draw);
+  draw();
+  updateKindSummary();
+}
+function updateKindSummary() { $('#kind-sum').textContent = OBS.sel.size ? `Kinds: ${OBS.sel.size} selected` : 'Kinds: all'; }
+const kindsChanged = (redraw = true) => { store.set('kinds', [...OBS.sel]); updateKindSummary(); if (redraw) renderKindPicker(); reloadObs(); };
+const reloadObs = debounce(() => loadObs(false), 250);
+function obsParams(extra = {}) {
+  const p = new URLSearchParams();
+  if (OBS.sel.size) p.set('kind', [...OBS.sel].join(','));
+  if (OBS.analyzer) p.set('analyzer', OBS.analyzer);
+  if (OBS.minConf > 0) p.set('min_conf', OBS.minConf);
+  if (OBS.win) p.set('since', OBS.win);
+  if (OBS.q) p.set('q', OBS.q);
+  p.set('limit', '100');
+  for (const [k, v] of Object.entries(extra)) p.set(k, v);
+  return p.toString();
+}
+async function loadObs(more) {
+  const seq = ++OBS.seq;
+  try {
+    const d = await api('api/observations?' + obsParams(more && OBS.next ? OBS.next : {}));
+    if (seq !== OBS.seq) return;                       // a newer filter change superseded this request
+    const body = $('#obs-body');
+    if (!more) { body.replaceChildren(); OBS.rows = 0; OBS.buffer = []; updateNewBar(); }
+    for (const o of d.rows) { body.append(obsRow(o)); OBS.rows++; OBS.maxId = Math.max(OBS.maxId, o.id); }
+    OBS.next = d.next;
+    $('#obs-more').classList.toggle('hidden', !d.next);
+    $('#obs-empty').classList.toggle('hidden', OBS.rows > 0);
+  } catch (e) { toast('Observations: ' + e.message); }
+}
+function obsRow(o, fresh = false) {
+  const media = el('span', { class: 'links' });
+  if (o.frame_url) media.append(el('a', { href: o.frame_url, target: '_blank', rel: 'noopener', title: 'Archived frame of this observation', onclick: ev => { ev.preventDefault(); ev.stopPropagation(); openImage(o.frame_url, `${o.kind} · frame ${o.frame_id}`); } }, 'frame'));
+  else if (o.near_frame_url) media.append(el('a', { href: o.near_frame_url, target: '_blank', rel: 'noopener', class: 'muted', title: 'Archived frame nearest in time (±2 min)', onclick: ev => ev.stopPropagation() }, 'near frame'));
+  if (o.audio_url) media.append(el('a', { href: o.audio_url, target: '_blank', rel: 'noopener', onclick: ev => ev.stopPropagation() }, 'audio'));
+  const tr = el('tr', { class: 'clickable' + (fresh ? ' fresh' : ''), tabindex: '0', title: 'Show details', dataset: null },
+    el('td', null, timeCell(o.ts)),
+    el('td', null, kindTag(o.kind)),
+    el('td', null, meter(o.confidence)),
+    el('td', { class: 'summary' }, o.summary || ''),
+    el('td', { class: 'muted' }, o.analyzer || ''),
+    el('td', null, media));
+  const open = () => openObs(o.id);
+  tr.addEventListener('click', open);
+  tr.addEventListener('keydown', ev => { if (ev.key === 'Enter') open(); });
+  return tr;
+}
+function obsMatches(o) {
+  if (OBS.sel.size && !OBS.sel.has(o.kind)) return false;
+  if (OBS.analyzer && o.analyzer !== OBS.analyzer) return false;
+  if (OBS.minConf > 0 && (o.confidence ?? 0) < OBS.minConf) return false;
+  if (OBS.win) { const m = /^(\d+)([hd])$/.exec(OBS.win); if (m && Date.parse(o.ts) < Date.now() - (+m[1]) * (m[2] === 'h' ? 3600e3 : 86400e3)) return false; }
+  if (OBS.q) { const q = OBS.q.toLowerCase(); if (!(JSON.stringify(o.value) + ' ' + (o.summary || '') + ' ' + o.kind + ' ' + (o.analyzer || '') + ' ' + (o.notes || '')).toLowerCase().includes(q)) return false; }
+  return true;
+}
+function onObservation(o) {
+  OBS.maxId = Math.max(OBS.maxId, o.id);
+  const k = OBS.kinds.find(x => x.kind === o.kind);
+  if (k) k.n++;
+  if (obsMatches(o)) {
+    if (OBS.live) {
+      const body = $('#obs-body');
+      body.prepend(obsRow(o, true)); OBS.rows++;
+      while (body.children.length > 600) body.lastElementChild.remove();
+      $('#obs-empty').classList.add('hidden');
+    } else { OBS.buffer.push(o); updateNewBar(); }
+  }
+  if (o.kind === 'whiteboard_text') { BOARDS.unseen++; if (activeTab !== 'boards') $('#badge-boards').textContent = BOARDS.unseen; refreshBoardsSoon(); }
+  if (TL_KINDS.has(o.kind)) refreshTimelineSoon();
+  if (o.kind === 'stream_health' || o.kind === 'uplink_signature') refreshStatusSoon();
+  if (activeTab === 'cal' && ['stream_latency', 'av_offset', 'clock_seen', 'uplink_signature'].includes(o.kind)) refreshCalSoon();
+}
+function updateNewBar() {
+  const n = OBS.buffer.length;
+  $('#obs-newbar').classList.toggle('hidden', n === 0);
+  $('#obs-shownew').textContent = `Show ${n} new observation${n === 1 ? '' : 's'}`;
+}
+function flushBuffer() {
+  const body = $('#obs-body');
+  for (const o of OBS.buffer) { body.prepend(obsRow(o, true)); OBS.rows++; }
+  OBS.buffer = []; updateNewBar();
+}
+async function openObs(id) {
+  try {
+    const o = await api('api/observations/' + id);
+    const body = [el('div', { class: 'kv' },
+      el('dt', null, 'Time (Oslo)'), el('dd', null, fmtT(o.ts) + (o.ts_oslo ? ` (${o.ts_oslo})` : '')),
+      el('dt', null, 'Time (UTC)'), el('dd', { class: 'mono' }, o.ts),
+      el('dt', null, 'Capture time'), el('dd', null, o.ts_capture ? `${fmtT(o.ts_capture)} Oslo · latency assumed ${fmtNum(o.delay_s, 1)} s` : '–'),
+      el('dt', null, 'Analyzer'), el('dd', null, `${o.analyzer} · confidence ${fmtNum(o.confidence)}`),
+      el('dt', null, 'Summary'), el('dd', null, o.summary || ''),
+      o.notes ? [el('dt', null, 'Notes'), el('dd', null, o.notes)] : null)];
+    const img = o.frame_url || o.near_frame_url;
+    if (img) body.push(el('figure', { style: 'margin:0' }, el('img', { src: img, alt: 'Frame', loading: 'lazy', onerror: ev => ev.target.closest('figure').replaceWith(el('div', { class: 'muted' }, 'No archived frame for this time.')) }),
+      el('figcaption', { class: 'muted', style: 'font-size:12.5px;margin-top:4px' }, o.frame_url ? `Frame ${o.frame_id}` : 'Nearest archived frame (within ±2 min)')));
+    if (o.audio_url) body.push(el('audio', { controls: true, src: o.audio_url, preload: 'none', style: 'width:100%' }));
+    body.push(el('pre', { class: 'json' }, JSON.stringify(o.value, null, 1)));
+    openDialog(`#${o.id} · ${o.kind}`, body);
+  } catch (e) { toast('Observation: ' + e.message); }
+}
+function openImage(url, title) { openDialog(title || 'Frame', [el('img', { src: url, alt: title || 'Frame' }), el('a', { href: url, target: '_blank', rel: 'noopener' }, 'Open full size in a new tab')]); }
+function openDialog(title, nodes) {
+  $('#dlg-title').textContent = title;
+  $('#dlg-body').replaceChildren(...nodes);
+  const d = $('#dlg'); if (!d.open) d.showModal();
+}
+
+/* =====================================================================================
+   Alerts (events)
+   ===================================================================================== */
+const EV = { status: store.get('evStatus', 'new'), newCount: 0, maxId: 0, notif: store.get('notif', false), sound: store.get('sound', false), audio: null };
+async function loadEvents() {
+  try {
+    const d = await api(`api/events?status=${EV.status}&limit=200`);
+    const ul = $('#ev-list'); ul.replaceChildren(...d.rows.map(e => evItem(e)));
+    for (const e of d.rows) EV.maxId = Math.max(EV.maxId, e.id);
+    EV.newCount = d.counts.new || 0; updateEvBadges();
+    $('#ev-empty').classList.toggle('hidden', d.rows.length > 0);
+  } catch (e) { toast('Alerts: ' + e.message); }
+}
+function evItem(e, fresh = false) {
+  const btn = el('button', { class: 'btn small ev-btn', 'aria-label': e.status === 'new' ? 'Acknowledge alert' : 'Mark alert as new' }, e.status === 'new' ? 'Ack' : 'Reopen');
+  const li = el('li', { class: (e.status === 'new' ? 'new' : '') + (fresh ? ' fresh' : ''), 'data-id': e.id },
+    el('div', { class: 'ev-meta' }, kindTag(e.kind), el('span', { class: 'status-tag' }, e.status)),
+    btn,
+    el('div', { class: 'ev-sum' }, e.summary || ''),
+    el('div', { class: 'ev-meta', title: e.ts }, el('span', null, fmtT(e.ts) + ' Oslo'), el('span', null, fmtT(e.ts, 'utc', false) + ' UTC'), el('span', null, ago(e.created || e.ts))),
+    (e.value && Object.keys(e.value).length) ? el('details', null, el('summary', null, 'details'), el('pre', { class: 'json' }, JSON.stringify(e.value, null, 1))) : null);
+  btn.addEventListener('click', () => setEvStatus(e.id, li.classList.contains('new') ? 'ack' : 'new'));
+  return li;
+}
+async function setEvStatus(id, status) {
+  try { const e = await api(`api/events/${id}/ack`, { method: 'POST', body: JSON.stringify({ status }) }); onEventUpdate(e); }
+  catch (err) { toast('Acknowledge failed: ' + err.message); }
+}
+function onEvent(e) {
+  EV.maxId = Math.max(EV.maxId, e.id);
+  if (e.status === 'new') { EV.newCount++; updateEvBadges(); notifyAlert(e); }
+  if (EV.status === 'all' || EV.status === e.status) { $('#ev-list').prepend(evItem(e, true)); $('#ev-empty').classList.add('hidden'); }
+  if (e.kind && e.kind.startsWith('engine')) refreshMapSoon();
+  if (e.kind === 'calibration_manual' || e.kind === 'latency_calibrated') refreshCalSoon();
+}
+function onEventUpdate(u) {
+  // idempotent: the ack response and the SSE broadcast of the same change may both arrive
+  const li = $(`#ev-list li[data-id="${u.id}"]`);
+  if (!li) { refreshEventsSoon(); return; }            // not on screen: let the server recount
+  const wasNew = li.classList.contains('new');
+  if (wasNew && u.status !== 'new') EV.newCount = Math.max(0, EV.newCount - 1);
+  else if (!wasNew && u.status === 'new') EV.newCount++;
+  if (EV.status !== 'all' && EV.status !== u.status) li.remove();
+  else {
+    li.classList.toggle('new', u.status === 'new');
+    li.querySelector('.status-tag').textContent = u.status;
+    const b = li.querySelector('.ev-btn');
+    b.textContent = u.status === 'new' ? 'Ack' : 'Reopen';
+    b.setAttribute('aria-label', u.status === 'new' ? 'Acknowledge alert' : 'Mark alert as new');
+  }
+  updateEvBadges();
+  $('#ev-empty').classList.toggle('hidden', $('#ev-list').children.length > 0);
+}
+function updateEvBadges() {
+  const n = EV.newCount || '';
+  $('#badge-alerts').textContent = n; $('#badge-alerts-m').textContent = n;
+  document.title = (EV.newCount ? `(${EV.newCount}) ` : '') + 'hordewatch';
+}
+async function ackAll() {
+  try { const d = await api(`api/events/ack_all?up_to_id=${EV.maxId}`, { method: 'POST' }); toast(`Acknowledged ${d.acked} alert(s)`, 'info', 2500); loadEvents(); }
+  catch (e) { toast('Ack all: ' + e.message); }
+}
+function notifyAlert(e) {
+  if (EV.notif && 'Notification' in window && Notification.permission === 'granted' && (document.visibilityState !== 'visible' || !document.hasFocus())) {
+    try { new Notification('hordewatch: ' + e.kind, { body: e.summary || '', tag: 'hw-' + e.id }); } catch { /* unsupported */ }
+  }
+  if (EV.sound) beep(e.kind && e.kind.startsWith('whiteboard') ? 2 : 1);
+}
+function beep(n = 1) {
+  try {
+    EV.audio = EV.audio || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = EV.audio;
+    for (let i = 0; i < n; i++) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime + i * 0.22;
+      o.frequency.value = 880; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.15, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.2);
+    }
+  } catch { /* no audio */ }
+}
+function syncAlertButtons() {
+  $('#notif-btn').setAttribute('aria-pressed', String(!!EV.notif));
+  $('#notif-btn').textContent = EV.notif ? 'Desktop alerts: on' : 'Desktop alerts: off';
+  $('#sound-btn').setAttribute('aria-pressed', String(!!EV.sound));
+  $('#sound-btn').textContent = EV.sound ? 'Sound: on' : 'Sound: off';
+}
+
+/* =====================================================================================
+   Latest frame
+   ===================================================================================== */
+let LF_ID = null;
+function onFrame(f) {
+  if (!f) return;
+  const cap = $('#lf-cap');
+  if (f.image) {
+    if (f.image.id !== LF_ID) { LF_ID = f.image.id; $('#lf-img').src = f.image.url; }
+    $('#lf-fig').classList.remove('hidden'); $('#lf-noimg').classList.add('hidden');
+    cap.replaceChildren(el('span', null, `Archived ${fmtT(f.image.real_ts)} Oslo`), el('span', { class: 'muted' }, fmtT(f.image.real_ts, 'utc', false) + ' UTC'),
+      el('span', { class: 'muted' }, `newest frame #${f.id} · ${ago(f.real_ts)}`),
+      f.latency_applied_s != null ? el('span', { class: 'muted', title: 'capture time − on-site time assumed by the ingest' }, `latency applied ${fmtNum(f.latency_applied_s, 0)} s`) : null);
+  } else {
+    $('#lf-noimg').textContent = `Newest frame #${f.id} (${fmtT(f.real_ts)} Oslo) is not archived yet`;
+  }
+}
+async function loadLatestFrame() { try { onFrame(await api('api/frames/latest')); } catch { /* ignore */ } }
+
+/* =====================================================================================
+   Whiteboard
+   ===================================================================================== */
+const BOARDS = { unseen: 0 };
+async function loadBoards() {
+  try {
+    const d = await api('api/whiteboard?limit=80' + ($('#boards-new').checked ? '&only_new=true' : ''));
+    const wrap = $('#boards'); wrap.replaceChildren(...d.boards.map(boardCard));
+    $('#boards-empty').classList.toggle('hidden', d.boards.length > 0);
+    $('#boards-count').textContent = d.boards.length ? `· ${d.boards.length} board${d.boards.length === 1 ? '' : 's'}, newest first` : '';
+  } catch (e) { toast('Whiteboard: ' + e.message); }
+}
+function boardCard(b) {
+  const crop = el('div', { class: 'crop' });
+  if (b.crop_url) {
+    const img = el('img', { src: b.crop_url, alt: 'Whiteboard crop: ' + (b.text || ''), loading: 'lazy' });
+    img.addEventListener('click', () => openImage(b.frame_url || b.crop_url, `Board ${fmtT(b.ts)} Oslo`));
+    img.addEventListener('error', () => crop.replaceChildren(el('div', { class: 'noimg' }, 'Crop unavailable')));
+    crop.append(img);
+  } else crop.append(el('div', { class: 'noimg' }, 'No archived frame for this board'));
+  const txt = el('div', { class: 'txt' });
+  if (b.ocr) txt.append(el('div', null, el('div', { class: 'src' }, 'OCR', b.ocr.ocr_conf != null ? el('span', null, `conf ${fmtNum(b.ocr.ocr_conf)}`) : null,
+    b.ocr.n_reads ? el('span', null, `${b.ocr.n_reads} reads`) : null, b.ocr.revision ? el('span', null, 'revised') : null), el('div', { class: 'bt' }, b.ocr.text)));
+  if (b.vlm) txt.append(el('div', null, el('div', { class: 'src' }, 'VLM', b.vlm.model ? el('span', null, b.vlm.model) : null, b.vlm.legible === false ? el('span', null, 'illegible?') : null),
+    el('div', { class: 'bt' + (b.ocr ? ' vlm' : '') }, b.vlm.text)));
+  const meta = el('div', { class: 'meta' },
+    b.is_new === true ? el('span', { class: 'pill new' }, 'NEW') : b.is_new === false ? el('span', { class: 'pill' }, 'REPEAT') : null,
+    el('span', { title: b.ts }, `${fmtT(b.ts)} Oslo · ${fmtT(b.ts, 'utc', false)} UTC`),
+    el('span', null, `conf ${fmtNum(b.confidence)}`),
+    b.first_seen_ts && b.last_seen_ts ? el('span', null, `held ${Math.max(0, Math.round((Date.parse(b.last_seen_ts) - Date.parse(b.first_seen_ts)) / 1000))} s`) : null,
+    el('a', { href: '#', onclick: ev => { ev.preventDefault(); openObs(b.id); } }, `obs #${b.obs_ids.join(', #')}`));
+  return el('article', { class: 'board' + (b.is_new ? ' isnew' : '') }, crop, txt, meta);
+}
+const refreshBoardsSoon = debounce(() => { if (loaded.boards) loadBoards(); }, 2000);
+
+/* =====================================================================================
+   Timeline (inline SVG; small multiples sharing one time axis - never a dual axis)
+   ===================================================================================== */
+const TL = { range: store.get('tlRange', '24h'), data: null, table: false, auto: true, last: 0, busy: false };
+const TL_KINDS = new Set(['sky_photometry', 'scene_photometry', 'cloud_fraction', 'rain_visual', 'audio_rain', 'gesture_point_up', 'audio_aircraft', 'aircraft_light', 'aircraft_match',
+  'audio_vehicle', 'audio_train', 'audio_gunshot', 'audio_chainsaw', 'audio_bells', 'audio_voice', 'audio_loop', 'ir_mode_switch', 'twilight_marker', 'night_light_event', 'whiteboard_text', 'clock_seen', 'stream_stall']);
+const LANES = [
+  { key: 'luma', title: 'Brightness · luma (0–255)', h: 132, series: ['sky_luma', 'scene_luma'], domain: [0, 255], ticks: [0, 50, 100, 150, 200, 250] },
+  { key: 'sun', title: 'Sun elevation (°)', h: 118, sun: true },
+  { key: 'wx', title: 'Cloud & rain (0–1)', h: 118, series: ['cloud_fraction', 'rain_visual', 'audio_rain'], domain: [0, 1], ticks: [0, 0.5, 1] },
+  { key: 'events', title: 'Events', markers: true },
+];
+async function loadTimeline() {
+  if (TL.busy) return;
+  TL.busy = true; TL.last = Date.now();
+  $('#tl-wrap').classList.add('loading');
+  const p = new URLSearchParams();
+  if (TL.range === 'custom') {
+    const f = osloLocalToUtcMs($('#tl-from').value), t = osloLocalToUtcMs($('#tl-to').value);
+    if (f != null) p.set('since', new Date(f).toISOString());
+    if (t != null) p.set('until', new Date(t).toISOString());
+  } else if (TL.range === 'all') p.set('since', '3650d');
+  else p.set('window', TL.range);
+  try {
+    TL.data = await api('api/timeline?' + p);
+    renderTimeline();
+  } catch (e) { toast('Timeline: ' + e.message); }
+  finally { TL.busy = false; $('#tl-wrap').classList.remove('loading'); }
+}
+function niceTicks(lo, hi, n = 4) {
+  const span = hi - lo || 1, step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= step0) || 10 * mag;
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6)); return out;
+}
+function nearest(points, t) {           // points sorted by [0]; binary search
+  let lo = 0, hi = points.length - 1; if (hi < 0) return null;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (points[m][0] < t) lo = m; else hi = m; }
+  return Math.abs(points[lo][0] - t) <= Math.abs(points[hi][0] - t) ? points[lo] : points[hi];
+}
+function renderTimeline() {
+  const d = TL.data; if (!d) return;
+  const svg = $('#tl-svg'), wrap = $('#tl-wrap');
+  const W = Math.max(320, wrap.clientWidth - 16), ML = 48, MR = 14, AX = 30;
+  const t0 = Date.parse(d.since), t1 = Date.parse(d.until), bucketMs = d.bucket_s * 1000;
+  const X = t => ML + (t - t0) / (t1 - t0) * (W - ML - MR);
+  const Tx = x => t0 + (x - ML) / (W - ML - MR) * (t1 - t0);
+  const lanes = LANES.map(l => ({ ...l }));
+  const ev = lanes.find(l => l.markers); ev.rows = d.lanes; ev.h = 26 + d.lanes.length * 24;
+  let y = 0; for (const l of lanes) { l.y = y; l.top = y + 24; l.bot = y + l.h - 8; y += l.h; }
+  const H = y + AX;
+  svg.replaceChildren(); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('height', H);
+  const info = $('#tl-info');
+  const sun = d.sun;
+  info.textContent = `${fmtT(d.since)} → ${fmtT(d.until)} Oslo · buckets ${d.bucket_s >= 60 ? (d.bucket_s / 60) + ' min' : d.bucket_s + ' s'} · sun at ${sun.lat.toFixed(3)} N ${sun.lon.toFixed(3)} E (${sun.source}; ${sun.model}). Shaded: sun below −6° (civil night).`;
+  // civil-night shading across all lanes
+  const sp = sun.points; let nStart = null;
+  for (let i = 0; i <= sp.length; i++) {
+    const dark = i < sp.length && sp[i][1] < -6;
+    if (dark && nStart == null) nStart = sp[i][0];
+    if (!dark && nStart != null) { const a = X(nStart), b = X(i < sp.length ? sp[i][0] : t1); svg.append(sv('rect', { class: 'night', x: a, y: 0, width: Math.max(0, b - a), height: y })); nStart = null; }
+  }
+  // x grid + axis
+  const STEPS = [60e3, 300e3, 900e3, 1800e3, 3600e3, 2 * 3600e3, 3 * 3600e3, 6 * 3600e3, 12 * 3600e3, 86400e3, 2 * 86400e3, 7 * 86400e3];
+  const step = STEPS.find(s => (t1 - t0) / s <= (W - ML - MR) / 86) || STEPS[STEPS.length - 1];
+  const off = osloOffsetMs(t0);
+  let lastDay = null;
+  for (let t = Math.ceil((t0 + off) / step) * step - off; t <= t1; t += step) {
+    const x = X(t);
+    svg.append(sv('line', { class: 'gridl', x1: x, x2: x, y1: 0, y2: y }));
+    const p = tparts(F_OSLO, new Date(t)), day = `${p.day}.${p.month}`;
+    const lbl = step >= 86400e3 ? day : `${p.hour}:${p.minute}`;
+    svg.append(sv('text', { class: 'ax-t', x, y: y + 13, 'text-anchor': 'middle' }, lbl));
+    if (step < 86400e3 && day !== lastDay) { svg.append(sv('text', { class: 'ax-t', x, y: y + 26, 'text-anchor': 'middle' }, day)); lastDay = day; }
+  }
+  svg.append(sv('line', { class: 'axisl', x1: ML, x2: W - MR, y1: y, y2: y }));
+  svg.append(sv('text', { class: 'ax-t', x: ML - 6, y: y + 13, 'text-anchor': 'end' }, 'Oslo'));
+  const scales = {};
+  for (const l of lanes) {
+    const title = l.key === 'sun' ? `${l.title} at ${sun.lat.toFixed(2)} N ${sun.lon.toFixed(2)} E` : l.title;
+    svg.append(sv('text', { class: 'lane-t', x: ML, y: l.y + 15 }, title));
+    l.legendX = ML + title.length * 6.8 + 18;
+    if (l.markers) { drawMarkerLane(svg, l, X, W, ML, MR); continue; }
+    let dom = l.domain, ticks = l.ticks;
+    if (l.sun) { const v = sp.map(p => p[1]); const lo = Math.floor(Math.min(...v, -6) / 10) * 10, hi = Math.ceil(Math.max(...v, 0) / 10) * 10; dom = [lo, hi]; ticks = niceTicks(lo, hi, 4); }
+    const Y = v => l.bot - (v - dom[0]) / (dom[1] - dom[0]) * (l.bot - l.top);
+    scales[l.key] = Y;
+    for (const tv of ticks) { svg.append(sv('line', { class: 'gridl', x1: ML, x2: W - MR, y1: Y(tv), y2: Y(tv) })); svg.append(sv('text', { class: 'ax-t', x: ML - 6, y: Y(tv) + 4, 'text-anchor': 'end' }, tv)); }
+    if (l.sun) {
+      for (const [v, name] of [[0, 'horizon'], [-6, 'civil −6°']]) {
+        svg.append(sv('line', { class: 'refl', x1: ML, x2: W - MR, y1: Y(v), y2: Y(v) }));
+        svg.append(sv('text', { class: 'ax-t', x: W - MR - 2, y: Y(v) - 3, 'text-anchor': 'end' }, name));
+      }
+      svg.append(sv('path', { class: 'ln c1', d: linePath(sp.map(p => [p[0], p[1]]), X, Y, Infinity) }));
+      for (const c of sun.crossings) if (c.elev_deg > -7) svg.append(sv('circle', { class: 'mk f1', cx: X(c.t), cy: Y(c.elev_deg), r: 4 }));
+      continue;
+    }
+    // legend (line keys) for multi-series lanes
+    let lx = l.legendX;
+    l.series.forEach((k, i) => {
+      const s = d.series[k]; if (!s) return;
+      const g = sv('g');
+      g.append(sv('line', { class: `ln c${i + 1}`, x1: lx, x2: lx + 14, y1: l.y + 11, y2: l.y + 11 }));
+      const t = sv('text', { class: 'leg-t', x: lx + 19, y: l.y + 15 }, `${s.label}${s.n ? '' : ' (no data)'}`);
+      g.append(t); svg.append(g); lx += 34 + (s.label.length + (s.n ? 0 : 10)) * 6.3;
+    });
+    let any = false;
+    l.series.forEach((k, i) => {
+      const s = d.series[k]; if (!s || !s.points.length) return; any = true;
+      svg.append(sv('path', { class: `ln c${i + 1}`, d: linePath(s.points, X, Y, bucketMs * 3) }));
+      if (s.points.length === 1) svg.append(sv('circle', { class: `mk f${i + 1}`, cx: X(s.points[0][0]), cy: Y(s.points[0][1]), r: 4 }));
+    });
+    if (!any) svg.append(sv('text', { class: 'ax-t', x: (ML + W - MR) / 2, y: (l.top + l.bot) / 2, 'text-anchor': 'middle' }, 'no data in this window'));
+  }
+  // crosshair + tooltip
+  const xh = sv('line', { class: 'xh', x1: -10, x2: -10, y1: 0, y2: y, visibility: 'hidden' });
+  const hit = sv('rect', { x: ML, y: 0, width: W - ML - MR, height: y, fill: 'transparent', style: 'cursor:crosshair' });
+  svg.append(xh, hit);
+  const tip = $('#tl-tip');
+  let hotMk = null;
+  const scale = () => svg.getBoundingClientRect().width / W;
+  function pick(ev) {
+    const r = svg.getBoundingClientRect(), k = scale();
+    const x = (ev.clientX - r.left) / k, yy = (ev.clientY - r.top) / k;
+    return { x: Math.max(ML, Math.min(W - MR, x)), y: yy, px: ev.clientX - wrap.getBoundingClientRect().left, py: ev.clientY - wrap.getBoundingClientRect().top };
+  }
+  function markerAt(x, yy) {
+    if (yy < ev.top - 4 || yy > ev.bot + 8) return null;
+    const row = Math.floor((yy - (ev.top + 6) + 12) / 24); const lane = d.lanes[row]; if (!lane) return null;
+    let best = null, bd = 12;
+    for (const m of lane.markers) { const dx = Math.abs(X(m.t) - x); if (dx < bd) { bd = dx; best = m; } }
+    return best ? { m: best, lane } : null;
+  }
+  hit.addEventListener('pointermove', e => {
+    const p = pick(e), t = Tx(p.x);
+    xh.setAttribute('x1', p.x); xh.setAttribute('x2', p.x); xh.setAttribute('visibility', 'visible');
+    const rows = [el('div', { class: 'tt' }, `${fmtT(t)} Oslo`, el('span', { class: 'muted', style: 'font-weight:400' }, ` · ${fmtT(t, 'utc', false)} UTC`))];
+    for (const l of lanes) {
+      if (!l.series) continue;
+      l.series.forEach((k, i) => {
+        const s = d.series[k]; if (!s || !s.points.length) return;
+        const q = nearest(s.points, t); if (!q || Math.abs(q[0] - t) > bucketMs * 1.5) return;
+        rows.push(el('div', { class: 'tr' }, el('i', { style: `background:var(--s${i + 1})` }), el('b', null, fmtNum(q[1], k.endsWith('luma') ? 1 : 2)), el('span', null, `${s.label}${q[2] > 1 ? ` (n=${q[2]})` : ''}`)));
+      });
+    }
+    const q = nearest(sp, t);
+    if (q) rows.push(el('div', { class: 'tr' }, el('i', { style: 'background:var(--s1)' }), el('b', null, fmtNum(q[1], 1) + '°'), el('span', null, `sun elevation · az ${fmtNum(q[2], 0)}°`)));
+    const cr = sun.crossings.filter(c => Math.abs(X(c.t) - p.x) < 10);
+    for (const c of cr) rows.push(el('div', { class: 'ev' }, `${c.event} ${fmtT(c.t, 'oslo', false)} Oslo`));
+    const mk = markerAt(p.x, p.y);
+    if (hotMk && (!mk || hotMk.m !== mk.m)) { hotMk.node && hotMk.node.classList.remove('hot'); hotMk = null; }
+    if (mk) {
+      rows.push(el('div', { class: 'sep' }));
+      rows.push(el('div', { class: 'ev' }, el('b', null, mk.m.kind), ` · ${fmtT(mk.m.t)} Oslo`));
+      rows.push(el('div', { class: 'ev' }, mk.m.label || ''));
+      rows.push(el('div', { class: 'muted', style: 'font-size:11.5px' }, 'click for details'));
+      hotMk = { m: mk.m, node: svg.querySelector(`[data-mk="${mk.lane.key}:${mk.m.t}:${mk.m.id ?? mk.m.event_id}"]`) };
+      hotMk.node && hotMk.node.classList.add('hot');
+      hit.style.cursor = 'pointer';
+    } else hit.style.cursor = 'crosshair';
+    tip.replaceChildren(...rows); tip.classList.remove('hidden');
+    const tw = tip.offsetWidth, ww = wrap.clientWidth;
+    tip.style.left = Math.min(ww - tw - 4, p.px + 14) + 'px';
+    tip.style.top = Math.max(4, p.py + 14) + 'px';
+  });
+  hit.addEventListener('pointerleave', () => { xh.setAttribute('visibility', 'hidden'); tip.classList.add('hidden'); if (hotMk && hotMk.node) hotMk.node.classList.remove('hot'); hotMk = null; });
+  hit.addEventListener('click', e => {
+    const p = pick(e), mk = markerAt(p.x, p.y);
+    if (!mk) return;
+    if (mk.m.id != null) openObs(mk.m.id);
+    else openDialog(`Alert #${mk.m.event_id} · ${mk.m.kind}`, [el('div', null, `${fmtT(mk.m.t)} Oslo`), el('div', null, mk.m.label || '')]);
+  });
+  if (TL.table) renderTimelineTable(); else $('#tl-tablewrap').classList.add('hidden');
+}
+function linePath(points, X, Y, gapMs) {
+  let s = '', prev = null;
+  for (const p of points) {
+    if (p[1] == null || !isFinite(p[1])) { prev = null; continue; }
+    s += (prev == null || p[0] - prev > gapMs ? 'M' : 'L') + X(p[0]).toFixed(1) + ',' + Y(p[1]).toFixed(1);
+    prev = p[0];
+  }
+  return s || 'M0,0';
+}
+function drawMarkerLane(svg, l, X, W, ML, MR) {
+  l.rows.forEach((lane, i) => {
+    const cy = l.top + 6 + i * 24;
+    svg.append(sv('line', { class: 'gridl', x1: ML, x2: W - MR, y1: cy, y2: cy }));
+    svg.append(sv('text', { class: 'leg-t', x: W - MR - 2, y: cy - 5, 'text-anchor': 'end' }, `${lane.label} · ${lane.n}`));
+    for (const m of lane.markers) {
+      const c = sv('circle', { class: `mk f${(i % 6) + 1}`, cx: X(m.t), cy, r: m.status === 'new' || (m.conf ?? 0) >= 0.6 ? 5 : 4, 'data-mk': `${lane.key}:${m.t}:${m.id ?? m.event_id}` });
+      svg.append(c);
+    }
+  });
+}
+function renderTimelineTable() {
+  const d = TL.data, wrap = $('#tl-tablewrap'); wrap.classList.remove('hidden');
+  const keys = Object.keys(d.series).filter(k => d.series[k].points.length);
+  const times = [...new Set(keys.flatMap(k => d.series[k].points.map(p => p[0])))].sort((a, b) => a - b).slice(-2000);
+  const idx = Object.fromEntries(keys.map(k => [k, new Map(d.series[k].points.map(p => [p[0], p[1]]))]));
+  const thead = el('thead', null, el('tr', null, el('th', null, 'Oslo'), el('th', null, 'UTC'), keys.map(k => el('th', null, d.series[k].label)), el('th', null, 'Sun elev (°)')));
+  const tbody = el('tbody');
+  for (const t of times.reverse()) {
+    const s = nearest(d.sun.points, t);
+    tbody.append(el('tr', null, el('td', null, fmtT(t)), el('td', { class: 'muted' }, fmtT(t, 'utc', false)), keys.map(k => el('td', null, idx[k].has(t) ? fmtNum(idx[k].get(t), 2) : '')), el('td', null, s ? fmtNum(s[1], 1) : '')));
+  }
+  wrap.replaceChildren(el('table', { class: 'data' }, thead, tbody));
+}
+const refreshTimelineSoon = debounce(() => { if (activeTab === 'timeline' && TL.auto && TL.range !== 'custom' && Date.now() - TL.last > 15000) loadTimeline(); }, 5000);
+
+/* =====================================================================================
+   Map & hotspots
+   ===================================================================================== */
+const MAP = { source: store.get('mapSource', 'base'), view: store.get('mapView', 'live'), map: null, group: null, data: null };
+async function loadMap() {
+  $('#map-source').value = MAP.source; setMapView(MAP.view, false);
+  try {
+    const [h, L, hist] = await Promise.all([api(`api/hotspots?source=${MAP.source}&top=40`), api('api/layers'), api('api/engine/history?limit=15')]);
+    MAP.data = h; MAP.layers = L.layers;
+    renderMapTiles(h); renderHotspotTable(h); renderLayers(L); renderHistory(hist.runs); renderLeaflet(); renderEngineFrame(h);
+  } catch (e) { toast('Map: ' + e.message); }
+}
+function renderMapTiles(h) {
+  const c = h.credible_km2 || {};
+  const tile = (lbl, val, sub) => el('div', { class: 'tile' }, el('div', { class: 'lbl' }, lbl), el('div', { class: 'val' }, val), sub ? el('div', { class: 'sub' }, sub) : null);
+  const top = h.hotspots[0];
+  $('#map-tiles').replaceChildren(
+    tile('50 % credible area', c['0.5'] != null ? `${Math.round(c['0.5']).toLocaleString('en-US')} km²` : '–', `80 %: ${c['0.8'] != null ? Math.round(c['0.8']).toLocaleString('en-US') : '–'} km² · 90 %: ${c['0.9'] != null ? Math.round(c['0.9']).toLocaleString('en-US') : '–'} km²`),
+    tile('#1 hotspot', top ? `${top.lat.toFixed(3)}, ${top.lon.toFixed(3)}` : '–', top ? `P(within 1.5 km) ${(100 * (top.p_within_1_5km || 0)).toFixed(2)} %` : 'no engine output'),
+    tile('Engine output', h.mtime ? fmtT(h.mtime, 'oslo', true, false) : '–', h.available ? `${h.file} · ${ago(h.mtime)}` : `${h.file} not found - run python -m hordejakt.cli`),
+    tile('Live layers', String((MAP.layers || []).length), 'data/hordewatch/layers/*.npz'));
+  $('#map-mtime').textContent = h.mtime ? `updated ${ago(h.mtime)}` : '';
+}
+function renderHotspotTable(h) {
+  const scen = h.source === 'scenarios';
+  $('#hs-table thead').replaceChildren(el('tr', null, el('th', null, '#'), el('th', null, 'Lat, lon'), el('th', null, 'P ≤1.5 km'), el('th', null, 'p cell'),
+    scen ? el('th', null, 'Fragility') : el('th', null, 'Strongest support'), scen ? el('th', null, 'Scenario spread') : el('th', null, 'Against'), el('th', null, 'Links')));
+  const tb = $('#hs-table tbody'); tb.replaceChildren();
+  if (!h.hotspots.length) { tb.append(el('tr', null, el('td', { colspan: 7, class: 'muted' }, h.available ? 'No hotspots in file.' : `${h.file} not found.`))); return; }
+  for (const s of h.hotspots) {
+    const coord = `${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}`;
+    const copy = el('button', { class: 'btn small', title: 'Copy coordinates' }, 'copy');
+    copy.addEventListener('click', ev => { ev.stopPropagation(); navigator.clipboard?.writeText(coord).then(() => toast(`Copied ${coord}`, 'info', 1800), () => toast('Clipboard blocked')); });
+    const ratios = Object.values(s.scenario_ratio || {});
+    const spread = ratios.length ? `${Math.min(...ratios).toFixed(2)}–${Math.max(...ratios).toFixed(2)}×` : '–';
+    const tr = el('tr', { class: 'clickable', tabindex: '0' },
+      el('td', { class: 'num' }, s.rank),
+      el('td', { class: 'mono' }, coord),
+      el('td', { class: 'num' }, s.p_within_1_5km != null ? (100 * s.p_within_1_5km).toFixed(2) + ' %' : '–'),
+      el('td', { class: 'num muted' }, s.p_cell != null ? Number(s.p_cell).toExponential(2) : '–'),
+      scen ? el('td', { class: 'num' }, fmtNum(s.fragility)) : el('td', null, (s.support || []).map(g => `${g.group} +${g.loglik.toFixed(2)}`).join(', ') || '–'),
+      scen ? el('td', { class: 'num', title: 'min–max of p_cell ratio across scenarios' }, spread) : el('td', { class: 'muted' }, (s.against || []).map(g => `${g.group} ${g.loglik.toFixed(2)}`).join(', ') || '–'),
+      el('td', null, el('span', { class: 'links' }, s.norgeskart ? el('a', { href: s.norgeskart, target: '_blank', rel: 'noopener', onclick: e => e.stopPropagation() }, 'Norgeskart') : null,
+        el('a', { href: s.google_maps, target: '_blank', rel: 'noopener', onclick: e => e.stopPropagation() }, 'Google'), copy)));
+    const fly = () => { if (MAP.map) { if (MAP.view !== 'live') setMapView('live'); MAP.map.flyTo([s.lat, s.lon], 12); } };
+    tr.addEventListener('click', fly); tr.addEventListener('keydown', e => { if (e.key === 'Enter') fly(); });
+    tb.append(tr);
+  }
+}
+function renderLayers(L) {
+  $('#layers-dir').textContent = L.dir;
+  const tb = $('#layers-table tbody'); tb.replaceChildren();
+  if (!L.layers.length) { tb.append(el('tr', null, el('td', { colspan: 7, class: 'muted' }, 'No live layers yet - bridges write them as evidence arrives.'))); return; }
+  for (const l of L.layers) {
+    if (l.error) { tb.append(el('tr', null, el('td', null, l.file), el('td', { colspan: 6, class: 'muted' }, 'unreadable: ' + l.error))); continue; }
+    tb.append(el('tr', null, el('td', { class: 'mono' }, l.name), el('td', { class: 'num' }, fmtNum(l.reliability)), el('td', { class: 'muted' }, l.independence_group || ''),
+      el('td', { class: 'num' }, (l.n_cells || 0).toLocaleString('en-US')),
+      el('td', null, l.peak ? el('a', { href: l.peak.norgeskart || l.peak.google_maps, target: '_blank', rel: 'noopener' }, `${l.peak.lat.toFixed(3)}, ${l.peak.lon.toFixed(3)}`) : '–'),
+      el('td', null, fmtT(l.mtime, 'oslo', true, false)), el('td', { class: 'summary' }, l.description || '')));
+  }
+}
+function renderHistory(runs) {
+  const tb = $('#hist-table tbody'); tb.replaceChildren();
+  if (!runs.length) { tb.append(el('tr', null, el('td', { colspan: 5, class: 'muted' }, 'No engine runs recorded yet (engine_bridge writes output/history/).'))); return; }
+  for (const r of runs) {
+    const ch = (r.changes || []).map(c => c.type === 'top_moved' ? `top moved ${c.km} km` : c.type === 'new_top_area' ? `new #${c.rank}` : c.type).join(', ');
+    tb.append(el('tr', null, el('td', null, fmtT(r.ts, 'oslo', true, false)),
+      el('td', { class: 'mono' }, r.top ? `${Number(r.top.lat).toFixed(3)}, ${Number(r.top.lon).toFixed(3)}` : '–'),
+      el('td', { class: 'num' }, r.credible_km2 && r.credible_km2['0.5'] != null ? `${Math.round(r.credible_km2['0.5'])} km²` : '–'),
+      el('td', null, (r.material ? '▲ ' : '') + (ch || '–')), el('td', { class: 'muted' }, (r.live_layers || []).join(', '))));
+  }
+}
+function renderLeaflet() {
+  const box = $('#leaf');
+  if (typeof window.L === 'undefined') { box.replaceChildren(el('div', { class: 'empty' }, 'Leaflet did not load (offline?). The hotspot table below still works; the engine map needs internet for tiles too.')); return; }
+  if (!MAP.map) {
+    MAP.map = L.map(box, { zoomControl: true, scrollWheelZoom: true }).setView([61.2, 10.9], 8);
+    const topo = L.tileLayer('https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png', { maxZoom: 18, attribution: '© Kartverket' });
+    const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' });
+    topo.addTo(MAP.map);
+    L.control.layers({ 'Kartverket topo': topo, OpenStreetMap: osm }).addTo(MAP.map);
+    L.control.scale({ imperial: false }).addTo(MAP.map);
+  }
+  if (MAP.group) MAP.group.remove();
+  MAP.group = L.featureGroup().addTo(MAP.map);
+  const cs = getComputedStyle(document.documentElement);
+  const c1 = cs.getPropertyValue('--s1').trim() || '#2a78d6', c2 = cs.getPropertyValue('--s2').trim() || '#eb6834', surf = cs.getPropertyValue('--surface').trim() || '#fff';
+  for (const s of (MAP.data?.hotspots || [])) {
+    const popup = el('div', null, el('b', null, `#${s.rank} `), `${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}`, el('br'),
+      `P(within 1.5 km) ${(100 * (s.p_within_1_5km || 0)).toFixed(2)} %`, el('br'),
+      s.norgeskart ? el('a', { href: s.norgeskart, target: '_blank', rel: 'noopener' }, 'Norgeskart') : null, ' · ',
+      el('a', { href: s.google_maps, target: '_blank', rel: 'noopener' }, 'Google Maps'));
+    L.circleMarker([s.lat, s.lon], { radius: s.rank <= 3 ? 9 : 6, color: surf, weight: 2, fillColor: c1, fillOpacity: 0.9 })
+      .bindTooltip(`#${s.rank}`, { direction: 'top' }).bindPopup(popup).addTo(MAP.group);
+  }
+  for (const l of (MAP.layers || [])) {
+    if (!l.peak) continue;
+    L.circleMarker([l.peak.lat, l.peak.lon], { radius: 5, color: surf, weight: 2, fillColor: c2, fillOpacity: 0.9 })
+      .bindTooltip(`layer peak: ${l.name}`, { direction: 'top' }).addTo(MAP.group);
+  }
+  if (MAP.group.getLayers().length) MAP.map.fitBounds(MAP.group.getBounds().pad(0.2), { maxZoom: 11 });
+  setTimeout(() => MAP.map.invalidateSize(), 60);
+}
+function renderEngineFrame(h) {
+  const box = $('#map-engine');
+  if (!h.map_url) { box.replaceChildren(el('div', { class: 'empty' }, 'output/map.html not found - run the engine (python -m hordejakt.cli).')); return; }
+  const cur = box.querySelector('iframe');
+  if (cur && cur.dataset.src === h.map_url) return;
+  box.replaceChildren(el('iframe', { class: 'engine', src: h.map_url, 'data-src': h.map_url, title: 'Engine posterior map (output/map.html)', loading: 'lazy' }));
+}
+function setMapView(v, save = true) {
+  MAP.view = v; if (save) store.set('mapView', v);
+  for (const b of $$('[data-mview]')) b.setAttribute('aria-pressed', String(b.dataset.mview === v));
+  $('#map-live').classList.toggle('hidden', v !== 'live'); $('#map-engine').classList.toggle('hidden', v !== 'engine');
+  if (v === 'live' && MAP.map) setTimeout(() => MAP.map.invalidateSize(), 50);
+}
+const refreshMapSoon = debounce(() => { if (loaded.map) loadMap(); }, 3000);
+
+/* =====================================================================================
+   Calibration
+   ===================================================================================== */
+async function loadCal() {
+  try { renderCal(await api('api/calibration')); } catch (e) { toast('Calibration: ' + e.message); }
+}
+function renderCal(c) {
+  const L = c.latency, lf = c.latest_frame;
+  const tile = (lbl, val, sub) => el('div', { class: 'tile' }, el('div', { class: 'lbl' }, lbl), el('div', { class: 'val' }, val), sub ? el('div', { class: 'sub' }, sub) : null);
+  const up = x => x ? `updated ${fmtT(x, 'oslo', true, false)} Oslo (${ago(x)})` : 'not calibrated yet';
+  $('#cal-tiles').replaceChildren(
+    tile('Stream latency', L.latency_s != null ? `${fmtNum(L.latency_s, 1)} s` : `${fmtNum(L.config_latency_s, 0)} s (config)`,
+      (L.latency_sigma_s != null ? `± ${fmtNum(L.latency_sigma_s, 1)} s · ` : `± ${fmtNum(L.config_latency_sigma_s, 0)} s prior · `) + (L.method ? `${L.method} · ` : '') + up(L.updated)),
+    tile('Audio offset', L.audio_offset_s != null ? `${fmtNum(L.audio_offset_s, 2)} s` : '0 s (assumed)', `audio_real = video_real + offset · ${up(L.audio_offset_updated)}`),
+    tile('Latency applied to newest frame', lf && lf.latency_applied_s != null ? `${fmtNum(lf.latency_applied_s, 1)} s` : '–', lf ? `frame #${lf.id} · capture ${fmtT(lf.capture_ts)} Oslo` : 'no frames yet'),
+    tile('Focal length (astro fit)', c.camera.astro_camera && c.camera.astro_camera.focal_px ? `${fmtNum(c.camera.astro_camera.focal_px, 0)} px` : '–',
+      c.camera.astro_camera ? `hfov ${fmtNum(c.camera.astro_camera.hfov_deg, 1)}° · ${c.camera.astro_camera.method}` : `prior ${c.camera.prior.focal_px} px (${c.camera.prior.source})`));
+  // camera
+  const cam = c.camera, kv = [];
+  const add = (k, v) => kv.push(el('dt', null, k), el('dd', null, v));
+  if (cam.config) add('Config (runner)', `heading ${fmtNum(cam.config.heading_deg, 1)}° · pitch ${fmtNum(cam.config.pitch_deg, 1)}° · roll ${fmtNum(cam.config.roll_deg, 1)}° · hfov ${fmtNum(cam.config.hfov_deg, 1)}°`);
+  add('Prior', `heading ${cam.prior.heading_deg}° · pitch ${cam.prior.pitch_deg}° · focal ${cam.prior.focal_px} px — ${cam.prior.source}`);
+  add('Board clue', cam.prior.note);
+  if (cam.astro_camera) {
+    const a = cam.astro_camera;
+    add('Astro fit', `${a.method} · f ${fmtNum(a.f, 4)} (× width) · rms ${fmtNum(a.rms_px, 4)} · n ${a.n ?? '–'} · ${a.pose_segments ?? 1} pose segment(s) · ${a.updated ? fmtT(a.updated) + ' Oslo' : ''}`);
+    if (a.implied_attitude) add('Implied attitude', `heading ${a.implied_attitude.heading_deg}° · pitch ${a.implied_attitude.pitch_deg}° · roll ${a.implied_attitude.roll_deg}° if the camera stood at ${a.implied_attitude.at.map(v => (+v).toFixed(3)).join(', ')} (${a.implied_attitude.at_source}). ${a.implied_attitude.note}`);
+  } else add('Astro fit', 'none yet (needs a sun track or star field; hordewatch.astro)');
+  if (cam.camera_attitude) add('Level reference (camera_attitude)', Object.entries(cam.camera_attitude).map(([k, v]) => `${k} ${typeof v === 'number' ? fmtNum(v, 2) : v}`).join(' · '));
+  if (cam.camera_moves && cam.camera_moves.length) add('Camera moves', cam.camera_moves.map(m => fmtT(m)).join(', '));
+  $('#cal-camera').replaceChildren(el('dl', { class: 'kv' }, kv));
+  // form
+  const num = (id, label, v, step, lo, hi) => el('label', null, label, el('input', { type: 'number', id, step, min: lo, max: hi, value: v ?? '' }));
+  const w = c.writable.numeric, wa = c.writable.camera_attitude, att = cam.camera_attitude || {};
+  const f1 = el('div', { class: 'form-row' }, num('cf-lat', 'latency_s', L.latency_s, '0.5', ...w.latency_s), num('cf-sig', 'latency_sigma_s', L.latency_sigma_s, '0.5', ...w.latency_sigma_s),
+    num('cf-aoff', 'audio_offset_s', L.audio_offset_s, '0.1', ...w.audio_offset_s), el('button', { class: 'btn primary', onclick: saveTiming }, 'Save timing'));
+  const f2 = el('div', { class: 'form-row' }, num('cf-hd', 'heading_deg', att.heading_deg, '0.1', ...wa.heading_deg), num('cf-hs', 'heading σ', att.heading_sigma_deg, '0.1', ...wa.heading_sigma_deg),
+    num('cf-pd', 'pitch_deg', att.pitch_deg, '0.1', ...wa.pitch_deg), num('cf-ps', 'pitch σ', att.pitch_sigma_deg, '0.1', ...wa.pitch_sigma_deg),
+    num('cf-rd', 'roll_deg', att.roll_deg, '0.1', ...wa.roll_deg), num('cf-rs', 'roll σ', att.roll_sigma_deg, '0.1', ...wa.roll_sigma_deg),
+    el('button', { class: 'btn primary', onclick: saveAttitude }, 'Save level reference'));
+  $('#cal-form').replaceChildren(
+    el('p', { class: 'muted', style: 'margin:0 0 8px;font-size:12.5px' }, 'Overrides go into the calibration table and are logged as an alert (calibration_manual). The runner reads latency_s when it starts; bridges read calibration live. Automatic calibration (ADS-B aircraft, clocks) may overwrite them.'),
+    el('div', { style: 'font-weight:600;margin:4px 0' }, 'Timing'), f1,
+    el('div', { style: 'font-weight:600;margin:14px 0 4px' }, 'Camera level reference (used by the astro solver)'), f2,
+    el('p', { class: 'muted', style: 'margin:8px 0 0;font-size:12.5px' }, '1° of pitch or roll error moves an astro fix ~111 km: only enter values backed by a plumb line / horizon, with an honest σ.'));
+  // evidence
+  const tb = $('#cal-ev tbody'); tb.replaceChildren();
+  if (!c.evidence.length) tb.append(el('tr', null, el('td', { colspan: 4, class: 'muted' }, 'No timing evidence yet.')));
+  for (const o of c.evidence) { const tr = el('tr', { class: 'clickable' }, el('td', null, timeCell(o.ts)), el('td', null, kindTag(o.kind)), el('td', null, meter(o.confidence)), el('td', { class: 'summary' }, o.summary)); tr.addEventListener('click', () => openObs(o.id)); tb.append(tr); }
+  const rb = $('#cal-rows tbody'); rb.replaceChildren();
+  for (const r of c.rows) rb.append(el('tr', null, el('td', { class: 'mono' }, r.key), el('td', null, el('pre', { class: 'json', style: 'margin:0;max-height:160px' }, JSON.stringify(r.value, null, 1))), el('td', null, fmtT(r.updated, 'oslo', true))));
+  if (!c.rows.length) rb.append(el('tr', null, el('td', { colspan: 3, class: 'muted' }, 'Calibration table is empty.')));
+}
+async function postCal(key, value) { return api('api/calibration', { method: 'POST', body: JSON.stringify({ key, value }) }); }
+async function saveTiming() {
+  try {
+    for (const [id, key] of [['cf-lat', 'latency_s'], ['cf-sig', 'latency_sigma_s'], ['cf-aoff', 'audio_offset_s']]) {
+      const v = $('#' + id).value; if (v === '') continue; await postCal(key, Number(v));
+    }
+    toast('Timing calibration saved', 'info', 2500); loadCal(); loadStatus();
+  } catch (e) { toast('Save failed: ' + e.message); }
+}
+async function saveAttitude() {
+  const m = { heading_deg: 'cf-hd', heading_sigma_deg: 'cf-hs', pitch_deg: 'cf-pd', pitch_sigma_deg: 'cf-ps', roll_deg: 'cf-rd', roll_sigma_deg: 'cf-rs' }, v = {};
+  for (const [k, id] of Object.entries(m)) { const x = $('#' + id).value; if (x !== '') v[k] = Number(x); }
+  if (!Object.keys(v).length) { toast('Enter at least one value'); return; }
+  try { await postCal('camera_attitude', v); toast('Camera level reference saved', 'info', 2500); loadCal(); } catch (e) { toast('Save failed: ' + e.message); }
+}
+const refreshCalSoon = debounce(() => { if (activeTab === 'cal') loadCal(); }, 1500);
+const refreshStatusSoon = debounce(loadStatus, 3000);
+const refreshEventsSoon = debounce(loadEvents, 800);
+
+/* =====================================================================================
+   Live stream (SSE). EventSource reconnects by itself and sends Last-Event-ID; the server
+   resumes from it. If the browser gives up (CLOSED), we reconnect with explicit cursors.
+   ===================================================================================== */
+const SSE = { es: null, lastObs: null, lastEv: null, retry: 0 };
+function connectSSE() {
+  if (SSE.es) SSE.es.close();
+  const q = SSE.lastObs != null ? `?since_obs=${SSE.lastObs}&since_event=${SSE.lastEv}` : '';
+  const es = SSE.es = new EventSource('api/stream' + q);
+  setChip('#chip-sse', 'idle', 'Connecting…');
+  es.addEventListener('hello', e => {
+    const h = JSON.parse(e.data); SSE.retry = 0;
+    if (SSE.lastObs == null) { SSE.lastObs = h.obs_cursor; SSE.lastEv = h.event_cursor; }
+    setChip('#chip-sse', 'good', 'Live', `Live updates connected ${fmtT(h.server_time)} Oslo`);
+  });
+  es.addEventListener('observation', e => { const o = JSON.parse(e.data); SSE.lastObs = Math.max(SSE.lastObs ?? 0, o.id); onObservation(o); });
+  es.addEventListener('event', e => { const v = JSON.parse(e.data); SSE.lastEv = Math.max(SSE.lastEv ?? 0, v.id); onEvent(v); });
+  es.addEventListener('event_update', e => onEventUpdate(JSON.parse(e.data)));
+  es.addEventListener('frame', e => onFrame(JSON.parse(e.data)));
+  es.addEventListener('calibration', e => { const c = JSON.parse(e.data); updateLatencyChip(c.latency_s, c.latency_sigma_s, c.audio_offset_s); refreshCalSoon(); });
+  es.onerror = () => {
+    if (es.readyState === EventSource.CLOSED) {
+      setChip('#chip-sse', 'bad', 'Offline', 'Live updates lost; retrying');
+      const wait = Math.min(30000, 1000 * Math.pow(2, SSE.retry++));
+      setTimeout(connectSSE, wait);
+    } else setChip('#chip-sse', 'warn', 'Reconnecting…', 'Live connection interrupted; the browser is reconnecting');
+  };
+}
+
+/* =====================================================================================
+   Boot
+   ===================================================================================== */
+function applyTheme(t) {
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  $('#theme-btn').textContent = 'Theme: ' + (t || 'auto');
+  if (TL.data && activeTab === 'timeline') renderTimeline();
+  if (MAP.map && MAP.data) renderLeaflet();
+}
+function syncHeaderHeight() { document.documentElement.style.setProperty('--hdr-h', $('#hdr').offsetHeight + 'px'); }
+function boot() {
+  let theme = store.get('theme', 'auto'); applyTheme(theme);
+  $('#theme-btn').addEventListener('click', () => { theme = { auto: 'light', light: 'dark', dark: 'auto' }[theme] || 'auto'; store.set('theme', theme); applyTheme(theme); });
+  for (const b of $$('#tabs button[data-tab]')) b.addEventListener('click', () => showTab(b.dataset.tab));
+  const mobileAlerts = () => $('#tab-alerts-mobile').classList.toggle('hidden', !narrow());
+  window.addEventListener('resize', debounce(() => { syncHeaderHeight(); mobileAlerts(); if (activeTab === 'timeline' && TL.data) renderTimeline(); }, 150));
+  syncHeaderHeight(); mobileAlerts();
+  // observation filters
+  $('#f-analyzer').addEventListener('change', e => { OBS.analyzer = e.target.value; store.set('analyzer', OBS.analyzer); reloadObs(); });
+  const conf = $('#f-conf'); conf.value = OBS.minConf; $('#f-conf-o').textContent = (+OBS.minConf).toFixed(2);
+  conf.addEventListener('input', () => { OBS.minConf = +conf.value; $('#f-conf-o').textContent = OBS.minConf.toFixed(2); store.set('minConf', OBS.minConf); reloadObs(); });
+  $('#f-win').value = OBS.win; $('#f-win').addEventListener('change', e => { OBS.win = e.target.value; store.set('win', OBS.win); reloadObs(); });
+  $('#f-q').addEventListener('input', debounce(e => { OBS.q = e.target.value.trim(); loadObs(false); }, 350));
+  $('#f-live').addEventListener('change', e => { OBS.live = e.target.checked; if (OBS.live) flushBuffer(); });
+  $('#obs-shownew').addEventListener('click', flushBuffer);
+  $('#obs-refresh').addEventListener('click', () => { loadKinds(); loadObs(false); });
+  $('#obs-more').addEventListener('click', () => loadObs(true));
+  document.addEventListener('click', e => { const dd = $('#kind-dd'); if (dd.open && !dd.contains(e.target)) dd.open = false; });
+  // alerts
+  $('#ev-status').value = EV.status;
+  $('#ev-status').addEventListener('change', e => { EV.status = e.target.value; store.set('evStatus', EV.status); loadEvents(); });
+  $('#ev-ackall').addEventListener('click', ackAll);
+  $('#notif-btn').addEventListener('click', async () => {
+    if (!EV.notif && 'Notification' in window && Notification.permission !== 'granted') {
+      const p = await Notification.requestPermission(); if (p !== 'granted') { toast('Desktop notifications were blocked by the browser'); return; }
+    }
+    EV.notif = !EV.notif; store.set('notif', EV.notif); syncAlertButtons();
+  });
+  $('#sound-btn').addEventListener('click', () => { EV.sound = !EV.sound; store.set('sound', EV.sound); syncAlertButtons(); if (EV.sound) beep(1); });
+  syncAlertButtons();
+  // boards
+  $('#boards-new').addEventListener('change', loadBoards); $('#boards-refresh').addEventListener('click', loadBoards);
+  // timeline
+  const markRange = () => { for (const b of $$('#tl-ranges [data-range]')) b.setAttribute('aria-pressed', String(b.dataset.range === TL.range)); $('#tl-custom').classList.toggle('hidden', TL.range !== 'custom'); };
+  for (const b of $$('#tl-ranges [data-range]')) b.addEventListener('click', () => {
+    TL.range = b.dataset.range; store.set('tlRange', TL.range); markRange();
+    if (TL.range === 'custom') { if (TL.data && !$('#tl-from').value) { $('#tl-from').value = utcMsToOsloLocal(Date.parse(TL.data.since)); $('#tl-to').value = utcMsToOsloLocal(Date.parse(TL.data.until)); } }
+    else loadTimeline();
+  });
+  $('#tl-apply').addEventListener('click', loadTimeline);
+  $('#tl-auto').addEventListener('change', e => { TL.auto = e.target.checked; });
+  $('#tl-table').addEventListener('click', e => { TL.table = !TL.table; e.target.setAttribute('aria-pressed', String(TL.table)); if (TL.table && TL.data) renderTimelineTable(); else $('#tl-tablewrap').classList.add('hidden'); });
+  markRange();
+  setInterval(() => { if (activeTab === 'timeline' && TL.auto && TL.range !== 'custom' && Date.now() - TL.last > 60000) loadTimeline(); }, 10000);
+  // map
+  $('#map-source').addEventListener('change', e => { MAP.source = e.target.value; store.set('mapSource', MAP.source); loadMap(); });
+  for (const b of $$('[data-mview]')) b.addEventListener('click', () => setMapView(b.dataset.mview));
+  $('#map-refresh').addEventListener('click', loadMap);
+  // misc
+  $('#dlg-close').addEventListener('click', () => $('#dlg').close());
+  $('#dlg').addEventListener('click', e => { if (e.target === $('#dlg')) $('#dlg').close(); });
+  $('#lf-img').addEventListener('click', () => openImage($('#lf-img').src, 'Latest archived frame'));
+  tickClock(); setInterval(tickClock, 1000);
+  loadStatus(); setInterval(loadStatus, 20000);
+  loadKinds(); loadObs(false); loadEvents(); loadLatestFrame();
+  showTab((location.hash || '').slice(1) || store.get('tab', 'obs'));
+  connectSSE();
+}
+document.addEventListener('DOMContentLoaded', boot);
+</script>
+</body>
+</html>

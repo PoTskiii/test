@@ -68,7 +68,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 from ..types import UTC, AudioChunk, Frame, parse_iso
-from . import pop_archive_request, publish_stats
+from . import pop_archive_request, publish_stats, register_stats
 from .archive import Archiver
 from .ffmpeg import ProbeInfo, ffmpeg_exe, parse_input_header, probe
 from .hls import HLSFetcher, PtsTimeMap, SegmentTimeline, parse_media_playlist, ts_scan, PTS_HZ, PTS_WRAP
@@ -341,6 +341,7 @@ class ReplaySource:
         self.stats = StreamStats(mode="replay", source=", ".join(str(p) for p in paths)[:200])
         self.stats.update(ffmpeg=self._exe, decoder="replay", timing="file")
         self.stats.add_callback(publish_stats)
+        register_stats(self.stats)
         archive_dir = s.get("archive_dir") or self.cfg.get("archive_dir")
         self.archiver = Archiver(archive_dir, g("archive_every_n_frames", 12), g("jpeg_quality", 90),
                                  g("archive_audio", False), enabled=g("archive", True))

@@ -19,10 +19,17 @@ sun_pixel
      so this term is soft);
    * a size prior and a sky context (the ring lies in the learned sky mask from the sky
      analyzer, else the upper 60 % of the frame).
-3. Refinement at full resolution in a crop around the winner. A round core (circularity
-   >= 0.6) gives the moment centroid (``method='core'``). An occluded, irregular core gives
-   the peak of the glare, blurred at the core scale, with a quadratic subpixel fit
-   (``method='glare'``).
+3. Refinement at full resolution in a crop around the winner. Core fragments split by a
+   branch are grouped (dilation by half the core radius) and treated as one core. Each
+   boundary point is then classified by the luma 2.5 px outside it. Glare (>= 0.6 x
+   sat_level) means a true limb of the disk; dark means an occluder (branch, trunk, crown).
+   - All limb points (>= 90 %) and a round shape: moment centroid (``method='core'``).
+   - Partly occluded: an algebraic circle fit (Kasa, one outlier pass) to the true limb
+     points only (``method='circle_fit'``). This recovers the centre to ~0.2 px even with
+     half the disk behind a trunk, where a centroid would be biased by up to r/2.
+   - Otherwise: peak of the glare, blurred at the core scale, with a quadratic subpixel fit
+     (``method='glare'``).
+   ``radius`` is the radius of the saturated core, which includes the innermost glare.
 4. Lens-flare ghosts are internal reflections that lie on the line from the sun through
    the optical centre, at p = S + k (C - S). Residual peaks (luma minus 31-px median) within
    1.2 % of the width of that line are counted. They slightly raise the confidence and are
@@ -96,6 +103,7 @@ def _circularity(comp_u8: np.ndarray, area: float) -> float:
 
 
 def _radial_profile(Y, core, cx, cy, r_eq, n_ann=4):
+    """Median luma in n_ann annuli outside the core (medians: robust to branches crossing the glare)."""
     h, w = Y.shape
     d = max(2.0, 0.6 * r_eq)
     R = r_eq + 1 + n_ann * d
@@ -108,12 +116,99 @@ def _radial_profile(Y, core, cx, cy, r_eq, n_ann=4):
     prof, sectors = [], []
     for i in range(n_ann):
         m = (rr >= r_eq + 1 + i * d) & (rr < r_eq + 1 + (i + 1) * d) & ~cw
-        prof.append(float(Yw[m].mean()) if m.sum() >= 4 else np.nan)
+        prof.append(float(np.median(Yw[m])) if m.sum() >= 4 else np.nan)
         if i < 2:
             sec = ((ang[m] + math.pi) / (2 * math.pi) * 8).astype(int) % 8
             vals = Yw[m]
-            sectors.append([float(vals[sec == s].mean()) if np.any(sec == s) else np.nan for s in range(8)])
+            sectors.append([float(np.median(vals[sec == s])) if np.any(sec == s) else np.nan for s in range(8)])
     return np.array(prof), np.array(sectors, float), (x0, y0, x1, y1), rr
+
+
+def _group_core(core: np.ndarray, gap: int):
+    """Label core pixels, merging fragments separated by up to ``gap`` px (a branch across the disk)."""
+    k = max(1, int(gap)) * 2 + 1
+    grown = cv2.dilate(core.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(grown, connectivity=8)
+    return n, lab * core, stats
+
+
+def _shape_circularity(pix: np.ndarray, close_px: int) -> float:
+    k = max(3, int(close_px) | 1)
+    closed = cv2.morphologyEx(pix.astype(np.uint8), cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    return _circularity(np.pad(closed, 1), float(closed.sum()))
+
+
+def fit_circle(x: np.ndarray, y: np.ndarray):
+    """Algebraic (Kasa) circle fit with one outlier-rejection pass: (xc, yc, r, rms) or None."""
+    x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+    for _ in range(2):
+        if len(x) < 6:
+            return None
+        A = np.column_stack([x, y, np.ones(len(x))])
+        b = -(x * x + y * y)
+        (D, E, F), *_ = np.linalg.lstsq(A, b, rcond=None)
+        xc, yc = -D / 2.0, -E / 2.0
+        r2 = xc * xc + yc * yc - F
+        if r2 <= 0:
+            return None
+        r = math.sqrt(r2)
+        res = np.hypot(x - xc, y - yc) - r
+        rms = float(np.sqrt(np.mean(res * res)))
+        keep = np.abs(res) <= max(1.5, 2.5 * rms)
+        if keep.all():
+            break
+        x, y = x[keep], y[keep]
+    return float(xc), float(yc), float(r), rms
+
+
+def _refine(crop: np.ndarray, saturated: bool, sat_level: int, lx: float, ly: float, r_full: float):
+    """Sub-pixel sun centre inside a full-resolution crop. Returns (x, y, radius, method, circularity, edge_frac)."""
+    Yc = luma(crop)
+    cc = (crop.min(axis=2) >= sat_level) if saturated else (Yc >= max(200.0, float(Yc.max()) - 6.0))
+    if cc.sum() >= 3:
+        n, lab, _ = _group_core(cc, max(2, int(0.5 * r_full)))
+        ids = [j for j in range(1, n) if (lab == j).any()]
+        if ids:
+            def dist(j):
+                ys, xs = np.nonzero(lab == j)
+                return float(np.min(np.hypot(xs - lx, ys - ly)))
+            j = min(ids, key=dist)
+            pix = lab == j
+            A = float(pix.sum())
+            r_area = math.sqrt(A / math.pi)
+            circ = _shape_circularity(pix, 0.6 * r_area)
+            ys, xs = np.nonzero(pix)
+            mx, my = float(xs.mean()), float(ys.mean())
+            cnts, _ = cv2.findContours(pix.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            pts = np.concatenate([c.reshape(-1, 2) for c in cnts], 0).astype(np.float64) if cnts else np.zeros((0, 2))
+            if len(pts) >= 8:
+                u = pts - (mx, my)
+                u /= np.maximum(np.hypot(u[:, 0], u[:, 1]), 1e-6)[:, None]
+                q = np.round(pts + 2.5 * u).astype(int)
+                inside = (q[:, 0] >= 0) & (q[:, 0] < Yc.shape[1]) & (q[:, 1] >= 0) & (q[:, 1] < Yc.shape[0])
+                val = np.zeros(len(q))
+                val[inside] = Yc[q[inside, 1], q[inside, 0]]
+                true_edge = inside & (val >= max(120.0, 0.6 * sat_level))
+                ef = float(true_edge.mean())
+                if ef >= 0.9 and circ >= 0.6:
+                    return mx, my, r_area, "core", circ, ef
+                if true_edge.sum() >= 12 and ef >= 0.3:
+                    fc = fit_circle(pts[true_edge, 0], pts[true_edge, 1])
+                    if fc is not None and 0.5 * r_area <= fc[2] <= 2.5 * r_area + 2 and fc[3] <= 1.5:
+                        return fc[0], fc[1], fc[2], "circle_fit", circ, ef
+                if circ >= 0.6:
+                    return mx, my, r_area, "core", circ, ef
+    sig = max(2.0, r_full)
+    B = cv2.GaussianBlur(Yc, (0, 0), sig)
+    iy, ix = np.unravel_index(int(np.argmax(B)), B.shape)
+    dx = dy = 0.0
+    if 0 < ix < B.shape[1] - 1:
+        den = B[iy, ix - 1] - 2 * B[iy, ix] + B[iy, ix + 1]
+        dx = 0.5 * (B[iy, ix - 1] - B[iy, ix + 1]) / den if den < 0 else 0.0
+    if 0 < iy < B.shape[0] - 1:
+        den = B[iy - 1, ix] - 2 * B[iy, ix] + B[iy + 1, ix]
+        dy = 0.5 * (B[iy - 1, ix] - B[iy + 1, ix]) / den if den < 0 else 0.0
+    return ix + float(np.clip(dx, -1, 1)), iy + float(np.clip(dy, -1, 1)), r_full, "glare", 0.0, 0.0
 
 
 def find_sun(rgb: np.ndarray, work_width: int = 640, sat_level: int = 235, sky_mask: Optional[np.ndarray] = None,
@@ -128,27 +223,26 @@ def find_sun(rgb: np.ndarray, work_width: int = 640, sat_level: int = 235, sky_m
         return None
     mn = small.min(axis=2)
     if int((mn >= sat_level).sum()) >= 2:
-        core, saturated = mn >= sat_level, True
+        core_b, saturated = mn >= sat_level, True
     else:
-        core, saturated = Y >= max(200.0, ymax - 6.0), False
-    core = cv2.morphologyEx(core.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
-    n, lab, stats, cents = cv2.connectedComponentsWithStats(core, connectivity=8)
+        core_b, saturated = Y >= max(200.0, ymax - 6.0), False
+    n, lab, stats = _group_core(core_b, 2)
     if n <= 1:
         return None
-    core_b = core > 0
     if sky_mask is not None and sky_mask.shape != (h, w):
         sky_mask = cv2.resize(sky_mask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
     order = 1 + np.argsort(-stats[1:, cv2.CC_STAT_AREA])[:max_candidates]
     best = None
     for k in order:
-        A = float(stats[k, cv2.CC_STAT_AREA])
+        bx, by, bw, bh = stats[k, :4]
+        pix = lab[by:by + bh, bx:bx + bw] == k
+        A = float(pix.sum())
         if A < 2:
             continue
-        cx, cy = cents[k]
+        ys, xs = np.nonzero(pix)
+        cx, cy = bx + float(xs.mean()), by + float(ys.mean())
         r_eq = math.sqrt(A / math.pi)
-        bx, by, bw, bh = stats[k, :4]
-        comp = (lab[by:by + bh, bx:bx + bw] == k).astype(np.uint8)
-        circ = _circularity(np.pad(comp, 1), A)
+        circ = _shape_circularity(np.pad(pix, 2), 0.6 * r_eq) if A >= 15 else 0.85
         prof, sectors, (x0, y0, x1, y1), rr = _radial_profile(Y, core_b, cx, cy, r_eq)
         pv = prof[np.isfinite(prof)]
         if len(pv) < 3:
@@ -178,43 +272,16 @@ def find_sun(rgb: np.ndarray, work_width: int = 640, sat_level: int = 235, sky_m
     R = int(max(3 * r_full, 24))
     x0, x1 = max(0, int(X0 - R)), min(W, int(X0 + R + 1))
     y0, y1 = max(0, int(Y0 - R)), min(H, int(Y0 + R + 1))
-    crop = rgb[y0:y1, x0:x1]
-    Yc = luma(crop)
-    cc = (crop.min(axis=2) >= sat_level) if saturated else (Yc >= max(200.0, float(Yc.max()) - 6.0))
-    n2, lab2, st2, ce2 = cv2.connectedComponentsWithStats(cc.astype(np.uint8), connectivity=8)
-    method, x, y, radius, circ2 = "glare", None, None, r_full, 0.0
-    if n2 > 1:
-        lx, ly = X0 - x0, Y0 - y0
-        d2 = [(math.hypot(ce2[j][0] - lx, ce2[j][1] - ly) - math.sqrt(st2[j, cv2.CC_STAT_AREA] / math.pi), j)
-              for j in range(1, n2)]
-        j = min(d2)[1]
-        comp = (lab2 == j).astype(np.uint8)
-        A2 = float(st2[j, cv2.CC_STAT_AREA])
-        circ2 = _circularity(np.pad(comp, 1), A2)
-        radius = math.sqrt(A2 / math.pi)
-        if circ2 >= 0.6:
-            M = cv2.moments(comp, binaryImage=True)
-            x, y, method = x0 + M["m10"] / M["m00"], y0 + M["m01"] / M["m00"], "core"
-    if x is None:
-        sig = max(2.0, r_full)
-        B = cv2.GaussianBlur(Yc, (0, 0), sig)
-        iy, ix = np.unravel_index(int(np.argmax(B)), B.shape)
-        dx = dy = 0.0
-        if 0 < ix < B.shape[1] - 1:
-            den = B[iy, ix - 1] - 2 * B[iy, ix] + B[iy, ix + 1]
-            dx = 0.5 * (B[iy, ix - 1] - B[iy, ix + 1]) / den if den < 0 else 0.0
-        if 0 < iy < B.shape[0] - 1:
-            den = B[iy - 1, ix] - 2 * B[iy, ix] + B[iy + 1, ix]
-            dy = 0.5 * (B[iy - 1, ix] - B[iy + 1, ix]) / den if den < 0 else 0.0
-        x, y = x0 + ix + float(np.clip(dx, -1, 1)), y0 + iy + float(np.clip(dy, -1, 1))
+    lx, ly, radius, method, circ2, ef = _refine(rgb[y0:y1, x0:x1], saturated, sat_level, X0 - x0, Y0 - y0, r_full)
+    x, y = x0 + lx, y0 + ly
     ghosts = find_ghosts(Y, (x * s, y * s), best["r_eq"])
     ghosts_full = [[g[0] / s, g[1] / s, g[2]] for g in ghosts]
     cxw, cyw = 0.5 * W, 0.5 * H
     line_angle = math.degrees(math.atan2(cyw - y, cxw - x)) % 360.0
     return {"x": float(x), "y": float(y), "xn": float(x / W), "yn": float(y / H), "radius": float(radius),
             "saturated": bool(saturated), "w": W, "h": H, "method": method, "score": float(best["score"]),
-            "circularity": float(max(best["circ"], circ2)), "falloff": best["falloff"], "isotropy": best["iso"],
-            "ghosts": ghosts_full, "n_ghosts": len(ghosts_full), "line_angle_deg": line_angle}
+            "circularity": float(max(best["circ"], circ2)), "edge_fraction": ef, "falloff": best["falloff"],
+            "isotropy": best["iso"], "ghosts": ghosts_full, "n_ghosts": len(ghosts_full), "line_angle_deg": line_angle}
 
 
 def find_ghosts(Y: np.ndarray, sun_xy, r_core: float, max_n: int = 6) -> list:

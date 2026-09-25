@@ -9,7 +9,7 @@ import os
 import subprocess
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -92,6 +92,8 @@ def _collect(src):
 
 @pytest.fixture(autouse=True)
 def _clean_bus():
+    ingest._BOUND.clear()
+    ingest._LATEST.clear()
     yield
     ingest._BOUND.clear()
     ingest._LATEST.clear()
@@ -614,6 +616,9 @@ def test_runner_end_to_end_with_replay(media, tmp_path):
     assert first[0].startswith("2026-09-25T14:20:00") and first[1].endswith("142000_0.jpg")
     kinds = {o["kind"] for o in db.observations()}
     assert "stream_health" in kinds
+    sh = db.observations(kind="stream_health")[0]
+    assert sh["ts"].strftime("%Y-%m-%d %H:%M") == "2026-09-25 14:20"      # replay: stamped with media time
+    assert sh["value"]["mode"] == "replay" and sh["value"]["resolution"] == f"{W}x{H}"
 
 
 def test_live_adapts_to_stream_without_audio(media, tmp_path):

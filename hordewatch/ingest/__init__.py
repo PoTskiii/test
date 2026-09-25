@@ -22,6 +22,9 @@ small process-wide bus instead:
   ``state['ingest']``, the name used in CONTRACT.md) to the latest snapshot;
 * ``pop_archive_request()`` lets a source see ``state['archive_next'] = True``
   set by any analyzer. It then force-archives the current frame.
+* ``register_stats(stats)`` (done by every source) plus ``current_stats()``
+  give a consumer that runs rarely, like ``stream_health`` once a minute, an
+  exact snapshot rather than the last throttled one.
 """
 from __future__ import annotations
 
@@ -66,6 +69,23 @@ def latest_stats() -> Optional[dict]:
         return _LATEST.get("snap")
 
 
+def register_stats(stats) -> None:
+    """Remember the active source's StreamStats object (the newest source wins)."""
+    with _BUS_LOCK:
+        _LATEST["stats"] = stats
+
+
+def current_stats() -> Optional[dict]:
+    """Fresh snapshot of the active source's stats (falls back to the last published one)."""
+    with _BUS_LOCK:
+        st = _LATEST.get("stats")
+    if st is not None:
+        snap = st.snapshot()
+        publish_stats(snap)
+        return snap
+    return latest_stats()
+
+
 def pop_archive_request() -> bool:
     """True (once) if an analyzer set ``state['archive_next'] = True`` in a bound state."""
     hit = False
@@ -95,4 +115,5 @@ def make_source(source_cfg: dict, clock, cfg: Optional[dict] = None, state: Opti
     return src
 
 
-__all__ = ["make_source", "bind_state", "unbind_state", "publish_stats", "latest_stats", "pop_archive_request"]
+__all__ = ["make_source", "bind_state", "unbind_state", "publish_stats", "latest_stats", "pop_archive_request",
+           "register_stats", "current_stats"]

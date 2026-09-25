@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import threading
 import time
 from collections import Counter
 
@@ -46,6 +47,9 @@ def main(argv=None):
                 "archive": bool(a.archive_dir)}
     cfg = {"archive_dir": a.archive_dir}
     src = make_source(scfg, StreamClock(latency_s=a.latency), cfg)
+    timer = threading.Timer(a.seconds, src.close)      # also fires while waiting in reconnect backoff
+    timer.daemon = True
+    timer.start()
     t0 = time.monotonic()
     n = 0
     try:
@@ -60,6 +64,7 @@ def main(argv=None):
     except KeyboardInterrupt:
         pass
     finally:
+        timer.cancel()
         src.close()
     s = src.stats.snapshot()
     kinds = Counter(e["kind"] for e in s["stall_events"])

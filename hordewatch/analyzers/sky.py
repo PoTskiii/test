@@ -39,10 +39,15 @@ What it measures (per sampled frame, ~256 px wide working copy, a few ms of CPU)
   pixels are counted as bright cloud. Skipped when the sun is < 3 deg (reddened sky looks
   like cloud), in IR, or when > 60 % of the sky is clipped.
 * ``direct_sun``: hard shadows on the ground (below 45 % height, outside the sky). Three
-  signs of direct sun: (1) linear-luminance dynamic range p95/p10 (sunlit patches are
-  ~5-20x brighter than shade; diffuse light gives ~3-6x); (2) the fraction of ground in
-  compact "sunlit patches" (> 3x the ground median); (3) the patches are warmer (lit by
-  sun + sky) than the shade, which is lit by the blue sky alone.
+  signs of direct sun, all scale-free:
+  (1) linear-luminance dynamic range p95/p10;
+  (2) bimodality. An Otsu split of the ground log-luminance gives two classes. If their
+  means differ by >= 3x (the direct/diffuse ratio; overcast albedo contrast between heather,
+  lichen and bark stays ~2x), the bright class is "sunlit" (``sunlit_fraction``,
+  ``class_ratio``). This works whether sunflecks are a minority under the canopy or most
+  of the ground is in sun;
+  (3) the sunlit class is warmer (lit by sun + sky) than the shade, which is lit by the blue
+  sky alone (``warm_shift`` = difference of mean log(R/B)).
 * ``fog``: contrast of a "far" band (35-55 % height, looking deep into the forest) against
   a "near" band (bottom 25 %). By Koschmieder, C(d) = C0 exp(-beta d), so fog kills
   distant contrast first while near contrast survives. The far/near ratio is compared with
@@ -83,7 +88,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -291,6 +296,24 @@ def cct_from_linear_rgb(rl, gl, bl):
     return float(T), float(sign * np.hypot(u - lu, v - lv))
 
 
+def otsu_threshold(v: np.ndarray, bins: int = 64) -> float:
+    """Otsu's threshold of a 1-D sample (maximises the between-class variance)."""
+    v = np.asarray(v, np.float64).ravel()
+    lo, hi = float(v.min()), float(v.max())
+    if hi - lo < 1e-9:
+        return hi
+    hist, edges = np.histogram(v, bins=bins, range=(lo, hi))
+    p = hist / hist.sum()
+    c = 0.5 * (edges[:-1] + edges[1:])
+    w0 = np.cumsum(p)
+    m0 = np.cumsum(p * c)
+    mt = m0[-1]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sb = (mt * w0 - m0) ** 2 / (w0 * (1 - w0))
+    sb[~np.isfinite(sb)] = 0
+    return float(edges[int(np.argmax(sb)) + 1])
+
+
 def immerkaer_noise(gray: np.ndarray) -> float:
     """Fast noise std estimate (Immerkaer 1996): sqrt(pi/2) / (6 (W-2)(H-2)) * sum |I * N|."""
     g = gray.astype(np.float32)
@@ -375,6 +398,7 @@ class TwilightTracker:
         self.alt_window, self.site, self.gate = tuple(alt_window), tuple(site), bool(gate)
         self.series = {}
         self.emitted = []
+        self._scanned = {}
 
     def add(self, t: float, value: Optional[float], mode: str = "day") -> list:
         if value is None or not np.isfinite(value) or value <= 0:
@@ -383,6 +407,10 @@ class TwilightTracker:
         d.append((float(t), math.log(float(value))))
         while d and d[0][0] < t - self.keep_s:
             d.popleft()
+        b = int(t // self.bin_s)
+        if self._scanned.get(mode) == b:          # scan once per completed bin (cheap at 5-s frames)
+            return []
+        self._scanned[mode] = b
         return self._scan(mode, float(t))
 
     def _binned(self, mode):
@@ -657,7 +685,7 @@ class SkyAnalyzer(Analyzer):
                 "luma": scene_luma, "luma_median": float(p50), "p5": float(p5), "p95": float(p95),
                 "clipped_frac": clip_all, "dark_frac": dark, "exposure_hint": hint, "noise_sigma": noise,
                 "ground_luma": float(Y[ground].mean()) if ground.any() else None,
-                "sat_median": float(np.median(cv2.cvtColor(np.ascontiguousarray(small), cv2.COLOR_RGB2HSV)[..., 1])),
+                "sat_median": float(np.median(hsv[..., 1])),
                 "ir_mode": ir, "sun_alt_approx_deg": alt, "w": W, "h": H}, 0.8))
 
         # ---- weather-ish measures (daytime only)
@@ -728,33 +756,41 @@ class SkyAnalyzer(Analyzer):
 
     # ------------------------------------------------------------------ direct sun
     def _direct_sun(self, frame, ctx, small, Y, mask, alt):
+        if alt < -1.0:                   # sun down everywhere in the domain: nothing to say
+            shared(ctx)["direct_sun"] = False
+            return None
         h, w = Y.shape
         ground = ~mask & (np.arange(h)[:, None] >= 0.45 * h) & ~rect_mask(h, w, self.p["exclude_norm"])
         if ground.sum() < 50:
             return None
         f = small.astype(np.float32)
         lin = srgb_to_linear(np.clip(Y, 0, 255)).astype(np.float32) + 1e-4
-        lg = lin[ground]
-        p10, p50, p95 = np.percentile(lg, [10, 50, 95])
-        dyn = float(p95 / max(p10, 1e-4))
-        bright = (lin > 3.0 * p50) & ground
+        ll = np.log(lin)
+        lg = ll[ground]
+        p10, p95 = np.percentile(lg, [10, 95])
+        dyn = float(np.exp(p95 - p10))
+        thr = otsu_threshold(lg)
+        hi_c, lo_c = lg >= thr, lg < thr
+        class_ratio = float(np.exp(lg[hi_c].mean() - lg[lo_c].mean())) if hi_c.any() and lo_c.any() else 1.0
+        bright = ground & (ll >= thr)
         bright = cv2.morphologyEx(bright.astype(np.uint8), cv2.MORPH_OPEN, np.ones((2, 2), np.uint8)) > 0
-        sunlit_fraction = float(bright.sum() / ground.sum())
+        shade = ground & (ll < thr)
+        sunlit_fraction = float(bright.sum() / ground.sum()) if class_ratio >= 3.0 else 0.0
         warm = None
-        if bright.sum() >= 5 and (ground & ~bright).sum() >= 5:
+        if bright.sum() >= 5 and shade.sum() >= 5:
             lrb = np.log((f[..., 0] + 4.0) / (f[..., 2] + 4.0))
-            warm = float(lrb[bright].mean() - lrb[ground & ~bright].mean())
+            warm = float(lrb[bright].mean() - lrb[shade].mean())
         s_dyn = float(np.clip((np.log10(dyn) - 0.8) / 0.6, 0, 1))
-        s_lit = float(np.clip(sunlit_fraction / 0.08, 0, 1))
+        s_cls = float(np.clip((class_ratio - 2.0) / 2.0, 0, 1)) * float(np.clip(sunlit_fraction / 0.05, 0, 1))
         s_warm = 0.5 if warm is None else float(np.clip(warm / 0.15, 0, 1))
-        score = 0.4 * s_dyn + 0.4 * s_lit + 0.2 * s_warm
+        score = 0.3 * s_dyn + 0.5 * s_cls + 0.2 * s_warm
         present = bool(score > 0.55 and alt > 2.0)
         shared(ctx)["direct_sun"] = present
         shared(ctx)["direct_sun_score"] = score
         conf = 0.25 + 0.3 * abs(score - 0.55) / 0.45 if alt > 2.0 else 0.5
         return self._obs("direct_sun", frame, {
-            "present": present, "sunlit_fraction": sunlit_fraction, "dynamic_range": dyn, "warm_shift": warm,
-            "score": score, "sun_alt_approx_deg": alt}, min(conf, 0.55))
+            "present": present, "sunlit_fraction": sunlit_fraction, "dynamic_range": dyn, "class_ratio": class_ratio,
+            "warm_shift": warm, "score": score, "sun_alt_approx_deg": alt}, min(conf, 0.55))
 
     # ------------------------------------------------------------------ fog
     @staticmethod

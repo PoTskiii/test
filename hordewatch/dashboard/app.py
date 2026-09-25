@@ -68,6 +68,7 @@ import re
 import sqlite3
 import threading
 import time
+import urllib.parse
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
@@ -408,13 +409,19 @@ def _nice_bucket(span_s: float, target: int = 1200) -> float:
     return float(NICE_BUCKETS[-1])
 
 
-def _bucketize(t: np.ndarray, v: np.ndarray, t0: float, bucket_s: float, agg: str):
-    ok = np.isfinite(t) & np.isfinite(v)
+def _bucketize(t: np.ndarray, v: np.ndarray, t0: float, bucket_s: float, agg: str, t1: Optional[float] = None):
+    """Aggregate samples into buckets [t0 + k*b, t0 + (k+1)*b) -> [[centre_ms, value, n], ...] (empty buckets
+    omitted, so the client can break lines at gaps). With ``t1`` the last bucket is clipped to the window:
+    a sample exactly at ``t1`` joins the last bucket and a partial bucket is centred inside the window."""
+    ok = np.isfinite(t) & np.isfinite(v) & (t >= t0)
+    if t1 is not None:
+        ok &= t <= t1
     t, v = t[ok], v[ok]
     if t.size == 0:
         return []
     b = np.floor((t - t0) / bucket_s).astype(np.int64)
-    b -= b.min() if b.min() < 0 else 0
+    if t1 is not None:
+        b = np.minimum(b, max(1, int(math.ceil((t1 - t0) / bucket_s))) - 1)
     nb = int(b.max()) + 1
     cnt = np.bincount(b, minlength=nb)
     if agg == "max":
@@ -423,8 +430,12 @@ def _bucketize(t: np.ndarray, v: np.ndarray, t0: float, bucket_s: float, agg: st
     else:
         val = np.bincount(b, weights=v, minlength=nb) / np.maximum(cnt, 1)
     keep = np.nonzero(cnt > 0)[0]
-    base = t0 + (np.floor((t.min() - t0) / bucket_s) if t.min() < t0 else 0) * bucket_s
-    return [[int(round((base + (k + 0.5) * bucket_s) * 1000)), round(float(val[k]), 4), int(cnt[k])] for k in keep]
+    out = []
+    for k in keep:
+        lo = t0 + k * bucket_s
+        hi = lo + bucket_s if t1 is None else min(lo + bucket_s, t1)
+        out.append([int(round(0.5 * (lo + hi) * 1000)), round(float(val[k]), 4), int(cnt[k])])
+    return out
 
 
 # =============================================================================== in-process bus
@@ -599,7 +610,7 @@ class Store:
                 "analyzer": r["analyzer"], "confidence": r["confidence"], "summary": summarize_value(r["kind"], value),
                 "value": v_out, "value_truncated": trunc, "frame_id": r["frame_id"], "audio_id": r["audio_id"],
                 "notes": r["notes"], "frame_url": frame_url, "audio_url": audio_url,
-                "near_frame_url": None if frame_url else f"api/frames/near?ts={r['ts']}"}
+                "near_frame_url": None if frame_url else "api/frames/near?ts=" + urllib.parse.quote(r["ts"] or "", safe="")}
 
     def observations(self, kinds=None, analyzer=None, min_conf=None, since=None, until=None, q=None,
                      limit=100, order="id", before_id=None, before_ts=None):
@@ -765,8 +776,9 @@ class Store:
         return out[: int(limit)]
 
     def _wb_card(self, g) -> dict:
-        ocr = [(r, v) for r, v in g["members"] if v.get("source") != "vlm" and r["analyzer"] != "vlm"]
-        vlm = [(r, v) for r, v in g["members"] if (r, v) not in ocr]
+        is_vlm = [v.get("source") == "vlm" or r["analyzer"] == "vlm" for r, v in g["members"]]
+        ocr = [m for m, x in zip(g["members"], is_vlm) if not x]
+        vlm = [m for m, x in zip(g["members"], is_vlm) if x]
         best_ocr = max(ocr, key=lambda rv: rv[0]["id"]) if ocr else None      # latest revision wins
         best_vlm = max(vlm, key=lambda rv: (rv[0]["confidence"] or 0, rv[0]["id"])) if vlm else None
         ref = best_ocr or best_vlm
@@ -870,11 +882,17 @@ class Store:
             t.append(unix_of(a))
         return np.array(t, float), np.array(v, float)
 
-    def timeline(self, since=None, until=None, bucket_s=None, sun_lat=None, sun_lon=None, max_markers=1500):
+    def timeline(self, since=None, until=None, bucket_s=None, sun_lat=None, sun_lon=None, max_markers=1500,
+                 window_s=86400.0):
+        """Chart data for [since, until]. Defaults: until = newest observation (so replays of old
+        recordings work too), since = until - window_s. Continuous series are bucketed (mean, or max for
+        rain) to ~1200 buckets; markers are thinned per time bin keeping the most confident."""
         dmin, dmax = self.data_range()
         now = utcnow()
         hi = until or dmax or iso(now)
-        lo = since or iso(parse_iso(hi) - timedelta(hours=24))
+        if until is None and since is not None and hi <= since:
+            hi = max(iso(now), since)          # 'last 6 h' although the newest data is older
+        lo = since or iso(parse_iso(hi) - timedelta(seconds=float(window_s)))
         t0, t1 = unix_of(lo), unix_of(hi)
         if t1 <= t0:
             raise ValueError("until must be after since")
@@ -886,7 +904,7 @@ class Store:
             for key, label, kind, expr, fn, agg, lane in SERIES:
                 t, v = self._series(con, kind, expr, fn, lo, hi)
                 series[key] = {"label": label, "kind": kind, "agg": agg, "lane": lane, "n": int(np.isfinite(v).sum()),
-                               "points": _bucketize(t, v, t0, b, agg)}
+                               "points": _bucketize(t, v, t0, b, agg, t1)}
             lanes = []
             for key, label, kinds in EVENT_LANES:
                 rows = con.execute("SELECT id, ts, kind, confidence, value FROM observations WHERE kind IN (%s) "
@@ -1051,7 +1069,6 @@ class Store:
         self._write("INSERT INTO events(ts, kind, summary, value, status, created) VALUES (?,?,?,?,?,?)",
                     (iso(now), "calibration_manual", f"manual calibration {key}: {json.dumps(old)} → {json.dumps(value)}",
                      json.dumps({"key": key, "old": old, "new": value}, ensure_ascii=False), "ack", iso(now)))
-        self.bus.publish("calibration", {"key": key, "value": value})
 
     def status(self):
         now = utcnow()
@@ -1134,8 +1151,10 @@ def _resolve(p) -> Path:
 
 
 def _float(x) -> float:
+    if x is None:
+        return np.nan
     try:
-        return float(x) if x is not None and not isinstance(x, bool) else (float(x) if isinstance(x, bool) else np.nan)
+        return float(x)
     except (TypeError, ValueError):
         return np.nan
 
@@ -1345,7 +1364,8 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
         return store.latest_frame() or {}
 
     @app.get("/api/frames/near")
-    def frames_near(ts: str, max_s: float = Query(120.0, gt=0, le=3600), redirect: bool = True):
+    def frames_near(ts: str, max_s: float = Query(120.0, gt=0, le=3600), info: bool = False):
+        """The archived frame nearest in (real) time to ``ts``: the image, or JSON metadata with ``info=1``."""
         try:
             t = parse_time_param(ts)
         except ValueError as e:
@@ -1355,9 +1375,9 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
             raise HTTPException(404, f"no archived frame within ±{max_s:.0f} s")
         d = {"id": r["id"], "real_ts": r["real_ts"], "real_ts_oslo": to_oslo(r["real_ts"]),
              "offset_s": round(unix_of(r["real_ts"]) - unix_of(t), 2), "url": f"api/frames/{r['id']}/image"}
-        if redirect:
-            return FileResponse(f, headers={"X-Frame-Id": str(r["id"]), "X-Frame-Offset-S": str(d["offset_s"])})
-        return d
+        if info:
+            return d
+        return FileResponse(f, headers={"X-Frame-Id": str(r["id"]), "X-Frame-Offset-S": str(d["offset_s"])})
 
     @app.get("/api/frames/{frame_id}/image")
     def frame_image(frame_id: int, max_w: Optional[int] = Query(None, ge=32, le=8000)):
@@ -1383,10 +1403,14 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
     @app.get("/api/timeline")
     def timeline(since: Optional[str] = None, until: Optional[str] = None, bucket_s: Optional[float] = Query(None, gt=0),
                  sun_lat: Optional[float] = Query(None, ge=-90, le=90), sun_lon: Optional[float] = Query(None, ge=-180, le=180),
-                 max_markers: int = Query(1500, ge=10, le=20000)):
+                 max_markers: int = Query(1500, ge=10, le=20000), window: str = "24h"):
         s, u = _times(since, until)
+        m = _REL.match(window or "")
+        if not m:
+            _bad("window must look like 6h / 3d / 90m")
+        win = float(m.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2).lower()]
         try:
-            return store.timeline(s, u, bucket_s, sun_lat, sun_lon, max_markers)
+            return store.timeline(s, u, bucket_s, sun_lat, sun_lon, max_markers, win)
         except ValueError as e:
             _bad(e)
 
@@ -1467,17 +1491,19 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
                 while True:
                     if await request.is_disconnected():
                         break
+                    prev_e = cur_e
                     obs, evs, cur_o, cur_e, fmax, cal, backlog = await run_in_threadpool(store.poll, cur_o, cur_e, kinds_)
-                    cid = f"o{cur_o}.e{cur_e}"
+                    # every data message carries the cursor *up to and including itself*, so a reconnect
+                    # (Last-Event-ID) after any message neither skips nor repeats rows
                     for o in obs:
-                        yield _sse("observation", o, f"o{o['id']}.e{cur_e}" if o is not obs[-1] else cid)
+                        yield _sse("observation", o, f"o{o['id']}.e{prev_e}")
                         sent += 1
                     for e in evs:
-                        yield _sse("event", e, cid)
+                        yield _sse("event", e, f"o{cur_o}.e{e['id']}")
                         sent += 1
                     for seq, name, data in store.bus.since(bus_seq):
                         bus_seq = seq
-                        yield _sse(name, data, cid)
+                        yield _sse(name, data)
                         if name == "event_update":
                             sent += 1
                     now = time.monotonic()
@@ -1488,14 +1514,14 @@ def create_app(db_path, output_dir=None, archive_dir=None, layers_dir=None, conf
                         yield _sse("calibration", {"latency_s": store.db.calibration("latency_s"),
                                                    "latency_sigma_s": store.db.calibration("latency_sigma_s"),
                                                    "audio_offset_s": store.db.calibration("audio_offset_s"),
-                                                   "updated": cal[0]}, cid)
+                                                   "updated": cal[0]})
                     if fmax != last_frame and now - last_frame_sent >= frame_every_s:
                         first = last_frame is None
                         last_frame, last_frame_sent = fmax, now
                         if not first and fmax:
                             lf = await run_in_threadpool(store.latest_frame)
                             if lf:
-                                yield _sse("frame", lf, cid)
+                                yield _sse("frame", lf)
                     if max_events is not None and sent >= max_events:
                         break
                     if timeout is not None and now - t_start >= timeout:

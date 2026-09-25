@@ -20,7 +20,7 @@ Stars vs. everything else
 -------------------------
 * Stars are static between frames. The sidereal rate is 15 deg/h x cos(dec), about 0.3 px
   per 5 s at 1280 px / 70 deg. So the star field is detected on the *median* of the last
-  ``stack_frames`` frames, which removes moving lights, single-frame speckle and
+  ``stack_frames`` frames within ``stack_max_span_s`` (15 s), which removes moving lights, single-frame speckle and
   compression flicker and gains ~sqrt(N) SNR.
 * Stars are not static over tens of minutes (~60 px in 20 min near the celestial
   equator). A source still within 1 px of a position seen > ``hot_px_after_s`` (20 min)
@@ -34,7 +34,10 @@ Stars vs. everything else
 ``star_field`` value = {n_stars, points: [[x, y, flux], ...] (full-res px, brightest
 first), w, h, noise_sigma, threshold, stack_n, fwhm_px, sky_region, drift, static_field,
 ir_mode}. The points feed the plate solver in hordewatch/astro. Emitted every
-``star_field_interval_s`` when >= ``min_stars`` sources are found.
+``star_field_interval_s`` when >= ``min_stars`` sources are found. The star count relative
+to the best count seen (decaying reference, >= 15 stars) is also reported as weak
+``cloud_fraction`` evidence (method 'star_count', confidence 0.2). Only fractions <= 0.5
+are reported, because few stars can also mean haze, dew or compression.
 
 Aircraft lights (multi-frame tracker, ``ctx.state['night']['tracks']``)
 ------------------------------------------------------------------------------
@@ -44,9 +47,11 @@ frame >= ``static_lag_s`` earlier. Tracks are predicted with constant velocity (
 + 25 % of the predicted motion; one-point tracks accept anything within v_max x dt) and
 assigned greedily by distance. A missed detection where the light should be counts as
 "off" (strobe or beacon blinking), and a gap longer than ``track_max_gap_s`` (default:
-4 frame intervals, clamped to 1-20 s) closes the track. A closed track with >= 3 detections, a straight-line fit rms <= 2.5 px and a speed
-between ``v_min_deg_s`` and ``v_max_deg_s`` is an ``aircraft_light``: {track: [[iso_ts,
-x, y], ...], speed_px_s, speed_deg_s, direction_deg_image, duty, blink_hz, colour, ...}.
+3.5 frame intervals, clamped to 1-20 s) closes the track. A closed track with >= 3
+detections, a straight-line fit rms <= 2.5 px and a speed between ``v_min_deg_s`` and
+``v_max_deg_s`` is an ``aircraft_light``: {track: [[iso_ts, x, y], ...], speed_px_s,
+speed_deg_s, direction_deg_image, duty, blink_hz, colour, ...}. The duty cycle is counted
+between the first and last detection only.
 ``blink_hz`` = (onsets - 1) / (t_last_onset - t_first_onset). It is only reported when
 the sampling interval is <= 0.5 s: anti-collision strobes flash at ~0.7-1.7 Hz, so 5-s
 sampling aliases completely, and only the duty cycle is meaningful there. In colour mode
@@ -113,6 +118,9 @@ def detect_points(Y: np.ndarray, roi: np.ndarray, bg_ksize: int = 11, psf_sigma:
     [x, y, flux, peak, snr, saturated, psf_sigma], brightest (matched-filter) first.
     """
     empty = np.zeros((0, 7), np.float32)
+    m = int(bg_ksize) // 2 + 2               # median / Gaussian border artefacts
+    roi = roi.copy()
+    roi[:m], roi[-m:], roi[:, :m], roi[:, -m:] = False, False, False, False
     if roi.sum() < 100:
         return empty, 0.0, 0.0
     y8 = np.clip(Y, 0, 255).astype(np.uint8)
@@ -310,7 +318,7 @@ def track_summary(tr: _Track, f_px: float) -> Optional[dict]:
     ry = p[:, 2] - (y0 + vy * (t - t[0]))
     rms = float(np.sqrt(np.mean(rx * rx + ry * ry)))
     speed = float(math.hypot(vx, vy))
-    samples = sorted(tr.samples)
+    samples = sorted(s for s in tr.samples if t[0] <= s[0] <= t[-1])   # trailing "off" after the light left: not blinking
     on = [s for s in samples if s[1]]
     duty = len(on) / max(len(samples), 1)
     st = np.array([s[0] for s in samples])
@@ -356,6 +364,7 @@ DEFAULTS = {
     "max_psf_sigma": 3.0,
     "mover_k_sigma": 6.0,
     "stack_frames": 3,
+    "stack_max_span_s": 15.0,
     "star_field_interval_s": 60.0,
     "min_stars": 5,
     "max_points": 300,
@@ -363,13 +372,14 @@ DEFAULTS = {
     "static_match_px": 1.5,
     "v_min_deg_s": 0.05,
     "v_max_deg_s": 3.0,
-    "track_max_gap_s": None,             # None: auto = clip(4 x frame interval, 1, 20) s
+    "track_max_gap_s": None,             # None: auto = clip(3.5 x frame interval, 1, 20) s
     "track_min_points": 3,
     "track_max_rms_px": 2.5,
     "track_max_s": 120.0,
     "hot_px_after_s": 1200.0,
     "drift_min_dt_s": 60.0,
     "drift_max_dt_s": 3600.0,
+    "cloud_min_ref_stars": 15,
     "moon_min_radius_px": 4.0,
     "moon_interval_s": 60.0,
     "moon_ephemeris_gate": True,
@@ -404,6 +414,8 @@ class NightSkyAnalyzer(Analyzer):
         self.light_recent = []            # (t, bbox_small)
         self.was_night = False
         self._dt = None                   # EMA of the frame interval (s)
+        self._pending = []
+        self._n_ref = 0.0
         self._t_prev = None
 
     # ------------------------------------------------------------------ helpers
@@ -411,7 +423,7 @@ class NightSkyAnalyzer(Analyzer):
     def max_gap_s(self):
         if self.p["track_max_gap_s"]:
             return float(self.p["track_max_gap_s"])
-        return float(np.clip(4.0 * (self._dt or 5.0), 1.0, 20.0))
+        return float(np.clip(3.5 * (self._dt or 5.0), 1.0, 20.0))
 
     def _obs(self, kind, frame, value, conf, ts=None):
         return Observation(kind=kind, ts=ts or frame.real_ts, value=clean(value), analyzer=self.name,
@@ -471,6 +483,7 @@ class NightSkyAnalyzer(Analyzer):
             return out
         self.was_night = True
         self._f = focal_px(self.config, W)
+        self._pending = []
         out = []
         roi, roi_src = self._roi(ctx, H, W)
         rows = np.nonzero(roi.any(axis=1))[0]
@@ -479,17 +492,20 @@ class NightSkyAnalyzer(Analyzer):
             r0, r1 = int(rows[0]), int(rows[-1]) + 1
             Yfull = luma(img[r0:r1])
             roi_s = roi[r0:r1]
-            moon = self._moon(frame, ctx, Yfull, r0, W, H, t, out)
+            moon_region = cv2.dilate(roi_s.astype(np.uint8), np.ones((25, 25), np.uint8)) > 0
+            moon = self._moon(frame, ctx, Yfull, moon_region, r0, W, H, t, out)
             if moon is not None:                 # keep the moon and its glow out of the point lists
                 yy, xx = np.mgrid[0:roi_s.shape[0], 0:W]
                 rad = 6 * (moon.get("radius") or 10.0) + 10
                 roi_s = roi_s & ((xx - moon["x"]) ** 2 + (yy - (moon["y"] - r0)) ** 2 > rad * rad)
             pts, sigma, thr = detect_points(Yfull, roi_s, self.p["bg_ksize"], self.p["psf_sigma"], self.p["k_sigma"],
                                             self.p["min_amp"], max_points=600)
-            pts = pts[pts[:, 6] <= self.p["max_psf_sigma"]] if len(pts) else pts
+            pts = pts[pts[:, 6] <= 1.7 * self.p["max_psf_sigma"]] if len(pts) else pts   # bright lights bloom
             if len(pts):
                 pts[:, 1] += r0
             out += self._track(frame, t, pts, img, ir, W, H, roi)
+            while self.stack and not (0 <= t - self.stack[0][0] <= self.p["stack_max_span_s"]):
+                self.stack.popleft()          # stars drift ~4 px/min: stack only a short span
             self.stack.append((t, Yfull, r0, roi_s))
             if self._last_sf is None or t - self._last_sf >= self.p["star_field_interval_s"] - 1e-6 or t < self._last_sf:
                 sf = self._star_field(frame, t, W, H, ir, roi_src)
@@ -497,6 +513,7 @@ class NightSkyAnalyzer(Analyzer):
                     self._last_sf = t
                     out.append(sf)
         out += self._lights(frame, thumb, ir, W, H, ctx, t)
+        out += self._pending
         st["tracks"] = [{"id": tr.id, "n": len(tr.pts), "last": tr.last[:3]} for tr in self.tracks]
         return out
 
@@ -649,6 +666,7 @@ class NightSkyAnalyzer(Analyzer):
         if len(pts) < self.p["min_stars"]:
             return None
         pts = pts[: int(self.p["max_points"])]
+        self._cloud_from_stars(frame, len(pts), static_field)
         fwhm = float(np.median(pts[:, 6])) * 2.3548
         conf = min(0.7, 0.3 + 0.02 * len(pts)) * (0.4 if static_field else 1.0)
         val = {"n_stars": int(len(pts)), "points": [[float(p[0]), float(p[1]), float(p[2])] for p in pts],
@@ -657,9 +675,22 @@ class NightSkyAnalyzer(Analyzer):
                "drift": drift, "static_field": static_field, "ir_mode": ir}
         return self._obs("star_field", frame, val, conf)
 
+    def _cloud_from_stars(self, frame, n, static_field):
+        """Clear-sky evidence at night: many stars relative to the best count seen = little cloud.
+
+        Few stars can also mean haze, dew on the lens or compression, so only fractions below 0.5 (at
+        least half of the reference count visible) are reported, with low confidence."""
+        if static_field:
+            return
+        self._n_ref = max(getattr(self, "_n_ref", 0.0) * 0.999, float(n))
+        if self._n_ref < self.p["cloud_min_ref_stars"] or n < 0.5 * self._n_ref:
+            return
+        frac = float(np.clip(1.0 - n / self._n_ref, 0.0, 1.0))
+        self._pending.append(self._obs("cloud_fraction", frame, {"fraction": frac, "method": "star_count", "n_stars": n,
+                                                                 "n_ref": self._n_ref}, 0.2))
+
     # ------------------------------------------------------------------ moon
-    def _moon(self, frame, ctx, Y, r0, W, H, t, out):
-        region = np.ones(Y.shape, bool)
+    def _moon(self, frame, ctx, Y, region, r0, W, H, t, out):
         m = find_moon(Y, region, self.p["moon_min_radius_px"])
         if m is None:
             return None

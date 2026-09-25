@@ -9,18 +9,20 @@ whole frame at a coarse scale.
 
 rain_visual
 -----------
-* Drops: difference-of-Gaussians blobs (fine: sigma 0.8/2.4 px in the box ROI; coarse:
-  sigma 3/9 px anywhere for lens drops), of both polarities (a drop acts as a small lens
-  showing an inverted, often brighter sky), above 5 robust sigma. Edge-like responses are
-  rejected with the Hessian ratio test (tr^2/det < (r+1)^2/r, r = 5), so bark and branch
-  edges are not drops.
-* Temporal logic: drops stick. A "new persistent drop" is a blob that was absent two
-  frames ago (t-2), appeared at t-1 and is still there at t (+-2 px, same polarity).
-  Texture is present in all frames and never counts. Noise or compression speckle rarely
-  survives at the same pixel. Blobs inside large changed regions are ignored (the frame
-  difference, blurred, > 20 levels, components > 1 % of the ROI: Anja moving, a hand, the
-  whiteboard). The count per 1e5 ROI pixels, minus a learned dry-weather base rate, gives
-  the drop term.
+* Drops: difference-of-Gaussians (DoG) blobs, fine (sigma 0.8/2.4 px, box ROI) and coarse
+  (sigma 3/9 px on a 320-px copy, anywhere: lens drops). Both polarities count, because a
+  drop acts as a small lens showing an inverted, often brighter sky. Drops stick, so the
+  test works on DoG *changes*:
+  - a new drop is a peak of D_t - g D_{t-2} above max(5 robust sigma, 6 levels), where g is
+    the least-squares gain, so a global light or exposure change cancels;
+  - it must already be present at t-1 (D_{t-1} - g' D_{t-2} > 0.6 thr);
+  - edge-like responses are rejected by the Hessian ratio test (tr^2/det < (r+1)^2/r, r = 5).
+  Static texture of any strength cancels in the difference, so near-threshold bark or heather
+  blobs cannot flicker into "new drops". Blobs inside large changed regions are ignored
+  (frame difference, blurred, > 20 levels, components > 1 % of the ROI: Anja moving, a hand,
+  the whiteboard). The count per 1e5 ROI pixels, minus a learned dry-weather base rate,
+  gives the drop term (``drops_heavy_per_1e5`` = 20, i.e. ~55 new drops per frame in the
+  default ROI at 960 px, saturates it).
 * Streaks: falling drops are motion-blurred into short near-vertical lines (very visible
   under the IR illuminator at night). They are transient: positive frame difference >
   max(5 sigma, 10), components with aspect >= 3, length 4-60 px and orientation within
@@ -66,24 +68,36 @@ from ..types import Observation
 from .base import Analyzer, Context
 from .sky import clean, downscale, frame_ir_mode, luma, rect_mask, sky_mask_for
 
-try:
-    from scipy.spatial import cKDTree
-except Exception:  # pragma: no cover - scipy is in the venv; grid hashing fallback below
-    cKDTree = None
-
 log = logging.getLogger("hordewatch.rain")
 
 
 # ============================================================================ blob / streak primitives
-def detect_blobs(Y: np.ndarray, roi: np.ndarray, s1: float = 0.8, s2: float = 2.4, k_sigma: float = 5.0,
-                 min_amp: float = 6.0, edge_r: float = 5.0, max_blobs: int = 3000) -> np.ndarray:
-    """DoG blob detector. Returns (N, 3) array [x, y, polarity(+1/-1)] in the given image's pixels."""
+def dog(Y: np.ndarray, s1: float, s2: float):
+    """(difference-of-Gaussians map, the sigma-s1 smoothed image)."""
     g1 = cv2.GaussianBlur(Y, (0, 0), s1)
-    g2 = cv2.GaussianBlur(Y, (0, 0), s2)
-    d = g1 - g2
-    vals = d[roi]
+    return g1 - cv2.GaussianBlur(Y, (0, 0), s2), g1
+
+
+def _gain(a: np.ndarray, b: np.ndarray, roi: np.ndarray) -> float:
+    """Least-squares gain g with a ~ g b over roi (global illumination / exposure change of the texture)."""
+    bb = float((b[roi] ** 2).sum())
+    return float(np.clip((a[roi] * b[roi]).sum() / bb, 0.5, 2.0)) if bb > 1e-6 else 1.0
+
+
+def new_persistent_blobs(d0: np.ndarray, d1: np.ndarray, d2: np.ndarray, g1: np.ndarray, roi: np.ndarray,
+                         s2: float, k_sigma: float = 5.0, min_amp: float = 6.0, ignore: Optional[np.ndarray] = None,
+                         edge_r: float = 5.0, max_blobs: int = 3000):
+    """Blobs that are present at t (d0) and t-1 (d1) but were absent at t-2 (d2): drops that landed and stuck.
+
+    Works on DoG *changes* (d0 - g d2, d1 - g' d2 with least-squares gains), so static texture -
+    however strong - cancels, and near-threshold texture cannot flicker into a "new" blob.
+    Returns ((N, 3) [x, y, polarity], noise sigma, threshold).
+    """
+    dd = d0 - _gain(d0, d2, roi) * d2
+    dd1 = d1 - _gain(d1, d2, roi) * d2
+    vals = dd[roi]
     if vals.size < 50:
-        return np.zeros((0, 3), np.float32)
+        return np.zeros((0, 3), np.float32), 0.0, 0.0
     sigma = 1.4826 * float(np.median(np.abs(vals - np.median(vals)))) + 1e-3
     thr = max(k_sigma * sigma, min_amp)
     k = max(3, int(2 * round(s2) + 1))
@@ -94,50 +108,17 @@ def detect_blobs(Y: np.ndarray, roi: np.ndarray, s1: float = 0.8, s2: float = 2.
     tr = dxx + dyy
     det = dxx * dyy - dxy * dxy
     blobby = (det > 0) & (tr * tr < det * (edge_r + 1) ** 2 / edge_r)
+    valid = roi & blobby if ignore is None else roi & blobby & ~ignore
     out = []
-    for pol, dd in ((1.0, d), (-1.0, -d)):
-        pk = (dd >= cv2.dilate(dd, ker)) & (dd > thr) & roi & blobby
+    for pol in (1.0, -1.0):
+        a = pol * dd
+        pk = (a >= cv2.dilate(a, ker)) & (a > thr) & valid & (cv2.dilate(pol * dd1, np.ones((3, 3), np.uint8)) > 0.6 * thr)
         ys, xs = np.nonzero(pk)
         if len(xs) > max_blobs:
-            o = np.argsort(-dd[ys, xs])[:max_blobs]
+            o = np.argsort(-a[ys, xs])[:max_blobs]
             ys, xs = ys[o], xs[o]
         out.append(np.stack([xs, ys, np.full(len(xs), pol)], 1).astype(np.float32))
-    return np.concatenate(out, 0)
-
-
-def _has_match(pts: np.ndarray, ref: Optional[np.ndarray], r: float) -> np.ndarray:
-    """For each point, whether ref has a point of the same polarity within r px (k-d tree; grid-hash fallback)."""
-    if ref is None or len(ref) == 0 or len(pts) == 0:
-        return np.zeros(len(pts), bool)
-    if cKDTree is not None:
-        out = np.zeros(len(pts), bool)
-        for pol in (1.0, -1.0):
-            a, b = pts[:, 2] == pol, ref[:, 2] == pol
-            if a.any() and b.any():
-                d, _ = cKDTree(ref[b, :2]).query(pts[a, :2], k=1, distance_upper_bound=r + 1e-6)
-                out[np.nonzero(a)[0]] = d <= r
-        return out
-    cell = max(r, 1.0)
-    table = {}
-    for x, y, p in ref:
-        table.setdefault((int(x // cell), int(y // cell), int(p)), []).append((x, y))
-    out = np.zeros(len(pts), bool)
-    r2 = r * r
-    for i, (x, y, p) in enumerate(pts):
-        cx, cy = int(x // cell), int(y // cell)
-        found = False
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                for qx, qy in table.get((cx + dx, cy + dy, int(p)), ()):
-                    if (qx - x) ** 2 + (qy - y) ** 2 <= r2:
-                        found = True
-                        break
-                if found:
-                    break
-            if found:
-                break
-        out[i] = found
-    return out
+    return np.concatenate(out, 0), sigma, thr
 
 
 def detect_streaks(Y: np.ndarray, Yprev: np.ndarray, roi: np.ndarray, ignore: np.ndarray, k_sigma: float = 5.0,
@@ -193,10 +174,10 @@ DEFAULTS = {
     "match_px": 2.0,
     "change_thr": 20.0,
     "change_min_frac": 0.01,
-    "drops_heavy_per_1e5": 60.0,
+    "drops_heavy_per_1e5": 20.0,
     "lens_heavy": 6.0,
     "streaks_heavy": 40.0,
-    "present_thr": 0.15,
+    "present_thr": 0.12,
     "persist_n": 2,
     "persist_of": 3,
     "cond_work_width": 320,
@@ -215,6 +196,7 @@ class _CondState:
         self.base_rim = None
         self.n = 0
         self.streak = 0
+        self.shape = None
 
 
 class RainAnalyzer(Analyzer):
@@ -226,7 +208,7 @@ class RainAnalyzer(Analyzer):
         super().__init__(config)
         cfg = config or {}
         self.p = {**DEFAULTS, **{k: v for k, v in cfg.items() if k != "_global"}}
-        self.hist = deque(maxlen=3)       # (Y, fine blobs, coarse blobs, change mask, mode)
+        self.hist = deque(maxlen=3)       # {Y, d_f (fine DoG), d_c (coarse DoG), chg (change mask), mode}
         self.raw_hist = deque(maxlen=int(self.p["persist_of"]))
         self.base_rate = 0.0
         self.wet_base = None
@@ -280,38 +262,33 @@ class RainAnalyzer(Analyzer):
         h, w = small.shape[:2]
         Y = luma(small)
         roi = rect_mask(h, w, [self.p["box_roi_norm"]])
-        fine = detect_blobs(Y, roi, 0.8, 2.4, self.p["blob_k_sigma"], self.p["blob_min_amp"])
+        d_f, g_f = dog(Y, 0.8, 2.4)
         coarse_img, cs = downscale(img, int(self.p["coarse_width"]))
         Yc = luma(coarse_img)
-        full_c = np.ones(Yc.shape, bool)
-        full_c[:3], full_c[-3:], full_c[:, :3], full_c[:, -3:] = False, False, False, False
-        coarse = detect_blobs(Yc, full_c, 3.0, 9.0, self.p["blob_k_sigma"], max(self.p["blob_min_amp"], 8.0))
+        d_c, g_c = dog(Yc, 3.0, 9.0)
         prev = self.hist[-1] if self.hist else None
-        if prev is not None and (prev[0].shape != Y.shape or prev[4] != mode):
+        if prev is not None and (prev["Y"].shape != Y.shape or prev["mode"] != mode):
             self.hist.clear()
             self.raw_hist.clear()
             prev = None
-        chg = (_change_mask(Y, prev[0], roi.sum(), self.p["change_thr"], self.p["change_min_frac"])
+        chg = (_change_mask(Y, prev["Y"], roi.sum(), self.p["change_thr"], self.p["change_min_frac"])
                if prev is not None else np.zeros_like(roi))
-        self.hist.append((Y, fine, coarse, chg, mode))
+        self.hist.append({"Y": Y, "d_f": d_f, "d_c": d_c, "chg": chg, "mode": mode})
         if len(self.hist) < 3:
             return None
-        (_, f2, c2, chg2, _), (Y1, f1, c1, chg1, _), _ = self.hist
-        ignore = chg | chg1
-        r = self.p["match_px"]
-        persistent = _has_match(fine, f1, r) & ~_has_match(fine, f2, r)
-        if len(fine):
-            xi = fine[:, 0].astype(int)
-            yi = fine[:, 1].astype(int)
-            persistent &= ~ignore[yi, xi]
-        n_new = int(persistent.sum())
+        h2, h1, _ = self.hist
+        ignore = chg | h1["chg"]
+        fine, sig_f, thr_f = new_persistent_blobs(d_f, h1["d_f"], h2["d_f"], g_f, roi, 2.4, self.p["blob_k_sigma"],
+                                                  self.p["blob_min_amp"], ignore)
+        n_new = int(len(fine))
         rate = n_new / max(roi.sum() / 1e5, 1e-6)
-        lens_new = _has_match(coarse, c1, 2.0) & ~_has_match(coarse, c2, 2.0)
-        if len(coarse):
-            ig_c = cv2.resize(ignore.astype(np.uint8), (Yc.shape[1], Yc.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
-            lens_new &= ~ig_c[coarse[:, 1].astype(int), coarse[:, 0].astype(int)]
-        n_lens = int(lens_new.sum())
-        n_streaks = detect_streaks(Y, Y1, roi, ignore)
+        full_c = np.ones(Yc.shape, bool)
+        full_c[:4], full_c[-4:], full_c[:, :4], full_c[:, -4:] = False, False, False, False
+        ig_c = cv2.resize(ignore.astype(np.uint8), (Yc.shape[1], Yc.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
+        lens, _, _ = new_persistent_blobs(d_c, h1["d_c"], h2["d_c"], g_c, full_c, 9.0, self.p["blob_k_sigma"],
+                                          max(self.p["blob_min_amp"], 8.0), ig_c)
+        n_lens = int(len(lens))
+        n_streaks = detect_streaks(Y, h1["Y"], roi, ignore)
         # wet-surface darkening (daytime, needs the sky analyzer's luma)
         dark = None
         sky = ctx.state.get("sky") or {}
@@ -340,7 +317,7 @@ class RainAnalyzer(Analyzer):
                 self.wet_base += 0.02 * (ratio - self.wet_base)
         return {"present": bool(present), "raw": raw, "new_drops": n_new, "drop_rate_per_1e5": rate,
                 "base_rate": self.base_rate, "lens_drops_new": n_lens, "streaks": n_streaks, "wet_darkening": dark,
-                "blobs_fine": int(len(fine)), "work_w": w, "box_roi_norm": self.p["box_roi_norm"]}
+                "dog_sigma": sig_f, "dog_thr": thr_f, "work_w": w, "box_roi_norm": self.p["box_roi_norm"]}
 
     # ------------------------------------------------------------------ condensation / frost
     def _condensation(self, frame, ctx, mode):
@@ -374,8 +351,9 @@ class RainAnalyzer(Analyzer):
         rim_mean = (roi_sum - float(inner.sum())) / max((y1 - y0) * (x1 - x0) - inner.size, 1)
         rim = rim_mean / max(float(inner.mean()), 1.0)
         S = self.cond[mode]
-        if S.base_c is None or S.base_c.shape != c.shape:
+        if S.base_c is None or S.base_c.shape != c.shape or S.shape != (h, w):
             S.base_c, S.base_dc, S.base_out, S.base_rim, S.n, S.streak = c.copy(), d.copy(), c_out, rim, 1, 0
+            S.shape = (h, w)
             return None
         g = (c_out / S.base_out) if (c_out is not None and S.base_out) else 1.0
         rel = (c / np.maximum(S.base_c, 1e-4)) / float(np.clip(g, 0.3, 1.5))

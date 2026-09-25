@@ -313,8 +313,10 @@ class DecoderHost:
             try:
                 self.session.write(data)
             except (BrokenPipeError, OSError, ValueError) as e:
-                log.warning("%s: ffmpeg input broke (%s): %s - restarting", self.label, e, self.session.error_summary())
+                dead = self.session
+                log.warning("%s: ffmpeg input broke (%s): %s - restarting", self.label, e, dead.error_summary())
                 self.finish(timeout=2.0)
+                self.adapt_to_error(dead)
                 self.start()
                 self.session.write(data)
 

@@ -218,40 +218,42 @@ def detect_persistent_carriers(spec: Spectrogram, *, floor_margin_db: float = 8.
                                max_bw_hz: float = 12e6) -> List[Carrier]:
     """Find steady, high duty-cycle carriers standing above the noise floor.
 
-    For every frequency bin we compute a robust per-bin noise floor (temporal
-    median), the *duty cycle* (fraction of sweeps whose power exceeds
-    floor + ``floor_margin_db``), and the temporal std of the power while the
-    carrier is present. A streaming-router uplink is *persistent* (duty >=
-    ``min_duty``) and *steady* (std <= ``max_steady_db``); a bursty phone fails
-    one or both. Contiguous qualifying bins (allowing ``merge_gap_bins`` gaps)
-    are merged into one carrier and its band is looked up.
+    The ambient noise floor is estimated **across frequency, per sweep** (the
+    robust band median), not per bin over time -- because a truly always-on
+    streaming carrier is present in *every* sweep, so its own per-bin temporal
+    floor would be just as high as its peaks and it would never look "elevated".
+    A bin is "present" in a sweep when its power exceeds that sweep's band floor
+    by ``floor_margin_db``. For each bin we then compute the *duty cycle*
+    (fraction of sweeps present) and the temporal std of its power while present.
+    A streaming-router uplink is *persistent* (duty >= ``min_duty``) and *steady*
+    (std <= ``max_steady_db``); a bursty phone fails one or both. Contiguous
+    qualifying bins (bridging ``merge_gap_bins`` gaps) are merged into a carrier
+    and its band is looked up.
 
     ``max_bw_hz`` rejects wide, whole-band elevations (a raised noise floor,
     downlink spillover) that are not a single carrier.
     """
     P = spec.power_db
     F = P.shape[1]
-    if spec.n_sweeps < 2:
+    if spec.n_sweeps < 2 or F < 4:
         return []
-    # per-bin robust floor over time (10th percentile ~ noise between bursts)
+    # ambient noise floor per sweep, robust to the (narrow) carrier bins
     with np.errstate(invalid="ignore"):
-        floor = np.nanpercentile(P, 10, axis=0)
-        floor = np.where(np.isfinite(floor), floor, np.nanmin(P))
-    thresh = floor + floor_margin_db
+        sweep_floor = np.nanmedian(P, axis=1)               # (T,)
+    sweep_floor = np.where(np.isfinite(sweep_floor), sweep_floor, np.nanmin(P))
+    thresh = sweep_floor[:, None] + floor_margin_db          # (T, F)
 
-    present = P >= thresh[None, :]           # (T, F) bool, NaN -> False
-    present = np.where(np.isfinite(P), present, False)
-    covered = np.isfinite(P).sum(axis=0)
-    covered = np.maximum(covered, 1)
+    present = np.isfinite(P) & (P >= thresh)                 # (T, F) bool
+    covered = np.maximum(np.isfinite(P).sum(axis=0), 1)
     duty = present.sum(axis=0) / covered
 
-    # power above floor and its temporal steadiness while present
-    over = P - floor[None, :]
+    over = P - sweep_floor[:, None]                          # power above ambient
     mean_over = np.array([np.nanmean(over[present[:, k], k]) if present[:, k].any() else 0.0
                           for k in range(F)])
     steady = np.array([np.nanstd(P[present[:, k], k]) if present[:, k].sum() >= 2 else 0.0
                        for k in range(F)])
-    peak = np.nan_to_num(np.nanmax(P, axis=0), nan=-999.0)
+    peak = np.nan_to_num(np.nanmax(np.where(np.isfinite(P), P, np.nan), axis=0), nan=-999.0)
+    floor = sweep_floor  # kept for downstream reference
 
     qualifies = (duty >= min_duty) & (steady <= max_steady_db) & (mean_over >= floor_margin_db)
 

@@ -59,7 +59,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from ..types import UTC, AudioChunk, Frame
-from . import pop_archive_request, publish_stats
+from . import pop_archive_request, publish_stats, register_stats
 from .archive import Archiver, SegmentArchiver
 from .ffmpeg import ffmpeg_exe, mpegts_safe
 from .hls import HLSFetcher, PlaylistGone, PtsTimeMap, SegmentTimeline, UnsupportedPlaylist
@@ -332,6 +332,7 @@ class LiveSource:
         self.stats = StreamStats(mode="live", source=redact_url(self.url))
         self.stats.update(ffmpeg=self._exe, pdt_offset_s=self.pdt_offset_s)
         self.stats.add_callback(publish_stats)
+        register_stats(self.stats)
         if self.clock_from_pdt:
             self.stats.add_callback(self._clock_follow_pdt)
         archive_dir = s.get("archive_dir") or self.cfg.get("archive_dir")
